@@ -1,0 +1,49 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code
+.vscode/
+
+# All image formats
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+*.ico
+*.webp
+
+# Medical imaging files
+*.dcm
+*.nii
+*.gz
+*.mha
+*.nrrd
+
+# Data folders
+data/
+datasets/
+sample_data/
+
+# Large files
+*.zip
+*.rar
+*.tar
+
+# Environment
+.env
+venv/
+env/
+
+# Docker
+docker-compose.yml
+dockerline
+
+# Logs & text outputs
+*.log
+*.csv
+*.xlsx

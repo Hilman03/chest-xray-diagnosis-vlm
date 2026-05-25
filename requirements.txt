@@ -1,0 +1,11 @@
+astapi
+uvicorn
+streamlit
+transformers
+torch
+pillow
+pymongo
+python-multipart
+pydicom
+opencv-python
+requests
