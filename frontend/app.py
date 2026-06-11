@@ -268,6 +268,18 @@ def fetch_reports(api_url):
     except:
         return {"total":0,"reports":[]}
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_image_bytes(api_url, image_id):
+    """Download raw image bytes once and cache — keeps slider edits instant."""
+    try:
+        r = requests.get(
+            api_url.rstrip("/") + f"/images/{image_id}",
+            headers=HDR, timeout=30
+        )
+        return r.content if r.ok else None
+    except:
+        return None
+
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_health(api_url):
     try:
@@ -665,61 +677,27 @@ with t2:
         left, right = st.columns([11,10], gap="large")
 
         with left:
-            with st.spinner("Loading image..."):
-                ir = req(f"/images/{sid}", t=30)
-            if ir:
-                # Apply W/L processing
-                processed = wl_img(ir.content)
+            # Cached fetch — only hits network once per study, so slider
+            # adjustments (brightness/contrast/W-L) reprocess locally and stay instant
+            raw_img = fetch_image_bytes(st.session_state.api, sid)
+            if raw_img:
+                # Apply W/L processing locally (fast, no network)
+                processed = wl_img(raw_img)
 
-                # Build DICOM-style patient overlay
+                # DICOM-style info strip above the image
                 p_id  = dm_pre.get("patient_id","—")
                 p_age = dm_pre.get("patient_age","—")
                 p_sex = dm_pre.get("patient_sex","—")
-                s_date= dm_pre.get("study_date","—")
+                acq_time = datetime.now().strftime("%d %b %Y  %H:%M")
 
-                # Format date display
-                acq_time = datetime.now().strftime("%m/%d/%Y, %I:%M:%S %p")
-
-                # Overlay HTML on top of image
                 st.markdown(f"""
-                <div style="position:relative; background:#000000;
-                            border:1px solid #1e2430; border-top:none;">
-                    <div style="position:absolute; top:8px; left:10px;
-                                z-index:10; pointer-events:none;
-                                font-family:'JetBrains Mono',monospace;
-                                font-size:11px; color:#00e0ff;
-                                line-height:1.7; text-shadow:1px 1px 2px #000;">
-                        {patient_name}<br>
-                        {p_id}<br>
-                        {s_date}<br>
-                        {p_age} / {p_sex}
-                    </div>
-                    <div style="position:absolute; top:8px; right:10px;
-                                z-index:10; pointer-events:none;
-                                font-family:'JetBrains Mono',monospace;
-                                font-size:11px; color:#00e0ff; text-align:right;
-                                line-height:1.7; text-shadow:1px 1px 2px #000;">
-                        CXR AI-PACS<br>
-                        {modality} · {view_pos}<br>
-                        {acq_time}<br>
-                        AI: {dis if sta=='analyzed' else '—'}
-                    </div>
-                    <div style="position:absolute; bottom:8px; left:10px;
-                                z-index:10; pointer-events:none;
-                                font-family:'JetBrains Mono',monospace;
-                                font-size:10px; color:#5a8a6a; line-height:1.7;
-                                text-shadow:1px 1px 2px #000;">
-                        W: {st.session_state.ww} &nbsp; C: {st.session_state.wl_val}<br>
-                        S: 1/1 &nbsp; IM: 1
-                    </div>
-                    <div style="position:absolute; bottom:8px; right:10px;
-                                z-index:10; pointer-events:none;
-                                font-family:'JetBrains Mono',monospace;
-                                font-size:10px; color:#5a8a6a; text-align:right;
-                                line-height:1.7; text-shadow:1px 1px 2px #000;">
-                        224 x 224<br>
-                        {'DICOM' if rep.get('is_dicom') else 'PNG'}
-                    </div>
+                <div style="background:#0a0c10; border:1px solid #1e2430;
+                            border-top:none; padding:6px 12px; display:flex;
+                            justify-content:space-between;
+                            font-family:'JetBrains Mono',monospace; font-size:10px;
+                            color:#00b0c0;">
+                    <span>{patient_name} · {p_id} · {p_age}/{p_sex}</span>
+                    <span>{modality} {view_pos} · {'DICOM' if rep.get('is_dicom') else 'PNG'} · {acq_time}</span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -735,7 +713,7 @@ with t2:
                             align-items:center; justify-content:center;
                             color:#2a3040; font-family:'JetBrains Mono',
                             monospace; font-size:13px;">
-                    Image unavailable
+                    Image unavailable — check API connection
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -780,10 +758,10 @@ with t2:
                         st.session_state[k] = v
                     st.rerun()
             with ic3:
-                if ir:
+                if raw_img:
                     st.download_button(
                         "Save image",
-                        data=wl_img(ir.content),
+                        data=wl_img(raw_img),
                         file_name=f"CXR_{sid[:8]}.png",
                         mime="image/png",
                         use_container_width=True,
@@ -1004,7 +982,7 @@ with t3:
             cl, cr = st.columns(2, gap="large")
             for col, iid, lbl in [(cl,opts[s1],s1),(cr,opts[s2],s2)]:
                 with col:
-                    ir  = req(f"/images/{iid}")
+                    img_bytes = fetch_image_bytes(st.session_state.api, iid)
                     rp  = req(f"/report/{iid}")
                     rj3 = rp.json() if rp else {}
                     dis3 = rj3.get("disease_label","—")
@@ -1032,9 +1010,9 @@ with t3:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    if ir:
+                    if img_bytes:
                         st.image(
-                            Image.open(io.BytesIO(ir.content)),
+                            Image.open(io.BytesIO(img_bytes)),
                             use_container_width=True
                         )
                     rep3 = rj3.get("llm_report","—")
@@ -1057,103 +1035,122 @@ with t4:
     with uc1:
         section("Upload Chest X-Ray")
 
-        up = st.file_uploader(
-            "Choose file",
+        ups = st.file_uploader(
+            "Choose file(s)",
             type=["png","jpg","jpeg","dcm"],
+            accept_multiple_files=True,
             label_visibility="collapsed",
-            help="PNG, JPG, JPEG, or DICOM (.dcm) — max 20 MB"
+            help="PNG, JPG, JPEG, or DICOM (.dcm) — select one or many, max 20 MB each"
         )
 
-        if up:
-            kb  = len(up.getvalue()) / 1024
-            dcm = up.name.lower().endswith(".dcm")
-
+        if ups:
+            total_kb = sum(len(f.getvalue()) for f in ups) / 1024
             st.markdown(f"""
             <div style="background:#232830; border:1px solid #2e3442;
                         border-radius:8px; padding:14px 16px; margin:12px 0;">
             """, unsafe_allow_html=True)
-            data_row("Filename", up.name)
-            data_row("File size", f"{kb:.0f} KB")
-            data_row("Format",
-                     "DICOM" if dcm else up.type.split("/")[-1].upper())
-            data_row("Preprocessing",  "Resize to 224 x 224 RGB",
-                     color="#72c472")
-            data_row("DICOM metadata",
-                     "Will be extracted" if dcm else "Not applicable",
-                     color="#72c472" if dcm else "#4a5368",
-                     border=False)
+            data_row("Files selected", str(len(ups)))
+            data_row("Total size", f"{total_kb:.0f} KB")
+            data_row("Preprocessing", "Resize to 224 x 224 RGB", color="#72c472")
+            data_row("Processing", "Sequential upload + analysis",
+                     color="#72c472", border=False)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            if st.button("Upload and Analyze",
-                         use_container_width=True, key="ub"):
-                prog = st.progress(0)
+            btn_label = ("Upload and Analyze" if len(ups) == 1
+                         else f"Upload and Analyze {len(ups)} images")
+            if st.button(btn_label, use_container_width=True, key="ub"):
+                prog    = st.progress(0)
+                results = []
+                errors  = []
+                n       = len(ups)
 
-                prog.progress(10, text="Step 1 of 3 — Uploading image...")
-                ru = req(
-                    "/upload", method="POST", t=30, no_cache=True,
-                    files={"file":(
-                        up.name, up.getvalue(),
-                        up.type or "image/png"
-                    )}
-                )
-                if not ru:
-                    prog.empty()
-                    st.error(
-                        "Upload failed. Check API connection "
-                        "and make sure the file is valid."
+                for idx, up in enumerate(ups):
+                    base = int(idx / n * 100)
+                    prog.progress(
+                        min(base + 5, 99),
+                        text=f"[{idx+1}/{n}] Uploading {up.name}..."
                     )
-                    st.stop()
-
-                uid = ru.json().get("image_id")
-                st.session_state.study_id = uid
-                prog.progress(35, text="Step 2 of 3 — Running AI analysis...")
-
-                ra = req(f"/analyze/{uid}", method="POST",
-                         t=120, no_cache=True)
-                if not ra:
-                    prog.empty()
-                    st.error(
-                        "Analysis timed out. "
-                        "This is normal on first run. Please try again."
+                    ru = req(
+                        "/upload", method="POST", t=30, no_cache=True,
+                        files={"file": (up.name, up.getvalue(),
+                                        up.type or "image/png")}
                     )
-                    st.stop()
+                    if not ru:
+                        errors.append(f"{up.name}: upload failed")
+                        continue
 
-                prog.progress(90, text="Step 3 of 3 — Saving to database...")
-                an = ra.json()
-                st.session_state.report = an
-                add_recent(uid)
+                    uid = ru.json().get("image_id")
+                    prog.progress(
+                        min(base + 15, 99),
+                        text=f"[{idx+1}/{n}] Analyzing {up.name}..."
+                    )
+                    ra = req(f"/analyze/{uid}", method="POST",
+                             t=180, no_cache=True)
+                    if not ra:
+                        errors.append(f"{up.name}: analysis failed/timed out")
+                        continue
+
+                    an = ra.json()
+                    results.append((uid, an))
+                    # Keep last successful study as the active one
+                    st.session_state.study_id = uid
+                    st.session_state.report   = an
+                    add_recent(uid)
+
                 prog.progress(100, text="Complete")
 
-                dis5 = an.get("disease_label","—")
-                urg5, uc5 = URGENCY.get(dis5,("ROUTINE","#6abe6a"))
-                st.markdown(f"""
-                <div style="background:#162316; border:1px solid #265626;
-                            border-left:4px solid #4abe4a; border-radius:6px;
-                            padding:14px 16px; margin-top:12px;">
-                    <div style="font-family:'Inter',sans-serif; font-size:14px;
-                                font-weight:600; color:#72c472; margin-bottom:8px;">
-                        Analysis complete
+                if results:
+                    st.markdown(f"""
+                    <div style="background:#162316; border:1px solid #265626;
+                                border-left:4px solid #4abe4a; border-radius:6px;
+                                padding:14px 16px; margin-top:12px;">
+                        <div style="font-family:'Inter',sans-serif; font-size:14px;
+                                    font-weight:600; color:#72c472; margin-bottom:8px;">
+                            {len(results)} of {n} analyzed successfully
+                        </div>
                     </div>
-                    <div style="font-family:'JetBrains Mono',monospace;
-                                font-size:12px; color:#5a8a5a; line-height:2;">
-                        Finding  &nbsp; {dis5}<br>
-                        Priority &nbsp; <span style="color:{uc5};">{urg5}</span><br>
-                        Time     &nbsp; {an.get('total_time',0)}s<br>
-                        Study ID &nbsp; {uid[:16]}...
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                st.info("Switch to the Viewer tab to see the full report")
+                    """, unsafe_allow_html=True)
+                    for uid, an in results:
+                        dis5 = an.get("disease_label","—")
+                        urg5, uc5 = URGENCY.get(dis5,("ROUTINE","#6abe6a"))
+                        data_row(an.get("filename", uid[:8]),
+                                 f"{dis5}  ·  {urg5}  ·  {an.get('total_time',0)}s",
+                                 color=uc5)
+
+                if errors:
+                    for e in errors:
+                        st.error(e)
+
+                if results:
+                    st.info("Switch to the Viewer tab to see the full reports")
 
     with uc2:
         section("Preview")
-        if up and not up.name.endswith(".dcm"):
-            try:
-                up.seek(0)
-                st.image(Image.open(up),
-                         use_container_width=True, caption=None)
-            except:
-                st.warning("Cannot preview this file")
+        if ups:
+            cols = st.columns(2)
+            for i, up in enumerate(ups[:6]):
+                with cols[i % 2]:
+                    if up.name.lower().endswith(".dcm"):
+                        st.markdown(f"""
+                        <div style="background:#161a22; border:1px solid #2a3040;
+                                    border-radius:6px; height:130px; display:flex;
+                                    align-items:center; justify-content:center;
+                                    flex-direction:column; gap:6px; color:#5a6a7a;
+                                    font-family:'JetBrains Mono',monospace;
+                                    font-size:11px; margin-bottom:8px;">
+                            DICOM<br>{up.name[:18]}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        try:
+                            up.seek(0)
+                            st.image(Image.open(up),
+                                     use_container_width=True,
+                                     caption=up.name[:20])
+                        except:
+                            st.warning(f"Cannot preview {up.name[:18]}")
+            if len(ups) > 6:
+                st.caption(f"+ {len(ups) - 6} more not shown")
         else:
             st.markdown("""
             <div style="background:#161a22; border:2px dashed #2a3040;

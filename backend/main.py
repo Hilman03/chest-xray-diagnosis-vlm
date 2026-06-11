@@ -139,6 +139,20 @@ def handle_dicom(dicom_path: str, png_path: str) -> dict:
         return {}
 
 
+def _latin1(text) -> str:
+    """Make any text safe for fpdf core fonts (latin-1 only)."""
+    if not isinstance(text, str):
+        text = str(text)
+    replacements = {
+        "—": "-", "–": "-", "‘": "'", "’": "'",
+        "“": '"', "”": '"', "…": "...", "·": "-",
+        "•": "-", " ": " ", "°": " deg",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
 def generate_pdf(record: dict) -> bytes:
     """Generate PDF report from analysis record."""
     try:
@@ -150,7 +164,7 @@ def generate_pdf(record: dict) -> bytes:
 
         # Header
         pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, "CXR PACS — AI Analysis Report", ln=True, align="C")
+        pdf.cell(0, 10, "CXR PACS - AI Analysis Report", ln=True, align="C")
         pdf.set_font("Arial", "", 10)
         pdf.cell(0, 6,
                  f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -165,10 +179,10 @@ def generate_pdf(record: dict) -> bytes:
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, "Image Information", ln=True)
         pdf.set_font("Arial", "", 11)
-        pdf.cell(0, 6, f"File      : {record.get('filename', 'N/A')}", ln=True)
-        pdf.cell(0, 6, f"Image ID  : {record.get('image_id', 'N/A')}", ln=True)
-        pdf.cell(0, 6, f"Uploaded  : {record.get('uploaded_at', 'N/A')}", ln=True)
-        pdf.cell(0, 6, f"Analyzed  : {record.get('analyzed_at', 'N/A')}", ln=True)
+        pdf.cell(0, 6, _latin1(f"File      : {record.get('filename', 'N/A')}"), ln=True)
+        pdf.cell(0, 6, _latin1(f"Image ID  : {record.get('image_id', 'N/A')}"), ln=True)
+        pdf.cell(0, 6, _latin1(f"Uploaded  : {record.get('uploaded_at', 'N/A')}"), ln=True)
+        pdf.cell(0, 6, _latin1(f"Analyzed  : {record.get('analyzed_at', 'N/A')}"), ln=True)
         pdf.ln(5)
 
         # DICOM metadata
@@ -179,7 +193,7 @@ def generate_pdf(record: dict) -> bytes:
             pdf.set_font("Arial", "", 11)
             for key, val in dicom_meta.items():
                 label = key.replace("_", " ").title()
-                pdf.cell(0, 6, f"{label:<20}: {val}", ln=True)
+                pdf.cell(0, 6, _latin1(f"{label:<20}: {val}"), ln=True)
             pdf.ln(5)
 
         # AI Analysis
@@ -187,7 +201,7 @@ def generate_pdf(record: dict) -> bytes:
         pdf.cell(0, 8, "VLM Analysis Results (PubMedCLIP)", ln=True)
         pdf.set_font("Arial", "", 11)
         pdf.cell(0, 6,
-                 f"Primary Finding : {record.get('disease_label', 'N/A')}",
+                 _latin1(f"Primary Finding : {record.get('disease_label', 'N/A')}"),
                  ln=True)
         pdf.ln(3)
 
@@ -198,7 +212,7 @@ def generate_pdf(record: dict) -> bytes:
             pdf.cell(50,  7, "Confidence", border=1, ln=True)
             pdf.set_font("Arial", "", 11)
             for disease, score in top_diseases:
-                pdf.cell(100, 7, str(disease), border=1)
+                pdf.cell(100, 7, _latin1(str(disease)), border=1)
                 pdf.cell(50,  7, f"{score*100:.1f}%", border=1, ln=True)
         pdf.ln(5)
 
@@ -206,7 +220,7 @@ def generate_pdf(record: dict) -> bytes:
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, "LLM Generated Observational Report", ln=True)
         pdf.set_font("Arial", "", 11)
-        pdf.multi_cell(0, 7, record.get("llm_report", "No report generated."))
+        pdf.multi_cell(0, 7, _latin1(record.get("llm_report", "No report generated.")))
         pdf.ln(5)
 
         # Performance
@@ -216,7 +230,7 @@ def generate_pdf(record: dict) -> bytes:
         pdf.cell(0, 6, f"VLM Inference Time : {record.get('vlm_time', 0)}s", ln=True)
         pdf.cell(0, 6, f"LLM Report Time    : {record.get('llm_time', 0)}s", ln=True)
         pdf.cell(0, 6, f"Total Time         : {record.get('total_time', 0)}s", ln=True)
-        pdf.cell(0, 6, f"LLM Backend        : {record.get('llm_backend', 'N/A')}", ln=True)
+        pdf.cell(0, 6, _latin1(f"LLM Backend        : {record.get('llm_backend', 'N/A')}"), ln=True)
         pdf.ln(5)
 
         # Disclaimer
@@ -230,7 +244,14 @@ def generate_pdf(record: dict) -> bytes:
             "use or medical diagnosis. Always consult a qualified radiologist."
         )
 
-        return pdf.output(dest="S").encode("latin-1")
+        # fpdf2 (installed in Colab) returns bytearray; old PyFPDF returns str
+        try:
+            out = pdf.output()           # fpdf2 → bytearray
+        except TypeError:
+            out = pdf.output(dest="S")   # PyFPDF fallback → str
+        if isinstance(out, str):
+            return out.encode("latin-1")
+        return bytes(out)
 
     except ImportError:
         raise HTTPException(
