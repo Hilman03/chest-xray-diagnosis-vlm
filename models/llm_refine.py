@@ -6,14 +6,11 @@ LLM Report Generation using TinyLlama 1.1B Chat
 Model : TinyLlama/TinyLlama-1.1B-Chat-v1.0
 Link  : https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0
 Size  : ~600MB
-RAM   : ~1GB on CPU
+RAM   : ~1.5GB on CPU
 
-Uses AutoModelForCausalLM + AutoTokenizer + GenerationConfig
-as per official HuggingFace transformers documentation.
-
-Backends (tried in order):
-    1. TinyLlama  — true LLM, proper fluent sentences
-    2. Template   — always works, no model needed
+Pure LLM generation — no template fallback.
+TinyLlama is a true causal language model trained on 3 trillion tokens.
+It generates natural clinical observations from PubMedCLIP predictions.
 
 Install:
     pip install torch transformers accelerate
@@ -38,18 +35,16 @@ from transformers import (
 # ─────────────────────────────────────────────────────────────
 LLM_MODEL      = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_NEW_TOKENS = 200
+MAX_NEW_TOKENS = 220
 
-# Singletons
 _model     = None
 _tokenizer = None
 
 
 # ─────────────────────────────────────────────────────────────
-# BACKEND 1 — TinyLlama
+# LOAD MODEL
 # ─────────────────────────────────────────────────────────────
 def load_tinyllama() -> bool:
-    """Load TinyLlama model and tokenizer. Returns True if successful."""
     global _model, _tokenizer
 
     if _model is not None:
@@ -65,7 +60,7 @@ def load_tinyllama() -> bool:
         _tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
         _model     = AutoModelForCausalLM.from_pretrained(
             LLM_MODEL,
-            torch_dtype=torch.float32,   # float32 for CPU stability
+            dtype=torch.float32,
             low_cpu_mem_usage=True,
         )
         _model.to(DEVICE)
@@ -79,63 +74,84 @@ def load_tinyllama() -> bool:
         return False
 
 
+# ─────────────────────────────────────────────────────────────
+# BUILD PROMPT
+# ─────────────────────────────────────────────────────────────
 def _build_prompt(caption: str, disease_label: str,
                   top_diseases: list = None) -> str:
     """
-    Build TinyLlama chat prompt — focused strictly on disease description.
-    Avoids mentioning PubMedCLIP or any system names.
+    Build TinyLlama chat prompt.
+
+    TinyLlama chat template:
+        <|system|> ... </s>
+        <|user|>   ... </s>
+        <|assistant|>
+
+    The prompt is designed to:
+    - Focus on clinical observation language
+    - Avoid mentioning AI or software systems
+    - Produce exactly 3 structured sentences
+    - Stay neutral and non-diagnostic
     """
-    # Get top confidence score for context
+    # Format confidence scores
     if top_diseases and len(top_diseases) > 0:
-        top_score = f"{top_diseases[0][1]*100:.1f}%"
+        top_score = f"{top_diseases[0][1]*100:.0f}%"
+        other_findings = ", ".join(
+            d for d, _ in top_diseases[1:]
+            if d != "No Finding"
+        )
     else:
-        top_score = "high"
+        top_score      = "high"
+        other_findings = ""
 
     system_msg = (
-        "You are a radiologist assistant. Your only job is to write "
-        "short, factual, 3-sentence chest X-ray observation reports. "
+        "You are a radiologist assistant. "
+        "You write short, factual, 3-sentence chest X-ray "
+        "observational reports in plain clinical language. "
         "You describe what is visually observed. "
-        "You never diagnose. You never mention AI systems or tools. "
-        "You write in plain clinical language."
+        "You never diagnose. You never mention software or AI. "
+        "You write in neutral, professional radiology language."
     )
 
     user_msg = (
-        f"Write a 3-sentence chest X-ray observation report for a patient "
-        f"whose X-ray shows {disease_label}.\n\n"
-        f"Use this information:\n"
-        f"- Primary finding: {disease_label}\n"
-        f"- Detection confidence: {top_score}\n"
-        f"- Visual observation: {caption}\n\n"
-        f"Format:\n"
-        f"Sentence 1: Describe overall image quality and patient positioning.\n"
-        f"Sentence 2: Describe the specific visual findings related to "
-        f"{disease_label} seen in the chest X-ray.\n"
-        f"Sentence 3: Note any additional observations or confirm no other "
-        f"abnormalities are present.\n\n"
-        f"Rules: 3 sentences only. No diagnosis. No treatment advice. "
-        f"Do not mention any AI or software systems."
+        f"Write a 3-sentence chest X-ray observational report "
+        f"for a patient whose X-ray shows {disease_label} "
+        f"with {top_score} detection confidence.\n\n"
+        f"Visual description: {caption}\n"
+        + (f"Additional findings considered: {other_findings}\n"
+           if other_findings else "") +
+        f"\nFormat your response as exactly 3 sentences:\n"
+        f"Sentence 1: Describe the overall image quality and "
+        f"patient positioning.\n"
+        f"Sentence 2: Describe the specific radiographic findings "
+        f"related to {disease_label}.\n"
+        f"Sentence 3: Note any additional observations or confirm "
+        f"no other significant abnormalities.\n\n"
+        f"Rules: exactly 3 sentences, neutral clinical language, "
+        f"no diagnosis, no treatment advice, no mention of AI or software."
     )
 
-    # TinyLlama chat template
-    prompt = (
+    return (
         f"<|system|>\n{system_msg}</s>\n"
         f"<|user|>\n{user_msg}</s>\n"
         f"<|assistant|>\n"
     )
 
-    return prompt
 
-
-def _refine_with_tinyllama(caption: str, disease_label: str,
-                            top_diseases: list = None) -> str:
+# ─────────────────────────────────────────────────────────────
+# GENERATE REPORT
+# ─────────────────────────────────────────────────────────────
+def _generate(caption: str, disease_label: str,
+              top_diseases: list = None) -> str:
     """
-    Generate report using TinyLlama with GenerationConfig.
-    Uses multinomial sampling (num_beams=1, do_sample=True)
-    for natural, varied text output.
+    Generate clinical report using TinyLlama.
+
+    Uses GenerationConfig with multinomial sampling
+    (num_beams=1, do_sample=True) as per HuggingFace docs.
     """
     prompt = _build_prompt(caption, disease_label, top_diseases)
 
-    # Tokenize prompt
+    # Tokenize
     inputs = _tokenizer(
         prompt,
         return_tensors="pt",
@@ -145,104 +161,52 @@ def _refine_with_tinyllama(caption: str, disease_label: str,
 
     input_length = inputs["input_ids"].shape[1]
 
-    # GenerationConfig — tight settings to keep output short and focused
+    # Generation config — multinomial sampling
     gen_config = GenerationConfig(
-        max_new_tokens=150,      # strict limit — 3 sentences only
-        do_sample=True,
-        num_beams=1,
-        temperature=0.4,         # lower = more focused, less creative
-        top_p=0.85,
-        repetition_penalty=1.3,  # stronger penalty against repetition
-        pad_token_id=_tokenizer.eos_token_id,
-        eos_token_id=_tokenizer.eos_token_id,
+        max_new_tokens    = MAX_NEW_TOKENS,
+        do_sample         = True,
+        num_beams         = 1,
+        temperature       = 0.4,     # lower = more focused
+        top_p             = 0.85,    # nucleus sampling
+        repetition_penalty= 1.3,     # avoid repeating phrases
+        pad_token_id      = _tokenizer.eos_token_id,
+        eos_token_id      = _tokenizer.eos_token_id,
     )
 
-    # Generate
     with torch.no_grad():
         outputs = _model.generate(
             **inputs,
             generation_config=gen_config,
         )
 
-    # Decode only newly generated tokens
+    # Decode only new tokens (exclude prompt)
     new_tokens = outputs[0][input_length:]
-    text       = _tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    text       = _tokenizer.decode(
+        new_tokens,
+        skip_special_tokens=True
+    ).strip()
 
-    # Clean up leftover chat tags
+    # Clean leftover chat tags
     for tag in ["<|system|>", "<|user|>", "<|assistant|>", "</s>"]:
         text = text.replace(tag, "").strip()
 
-    # Extract exactly 3 sentences — stop after the third period
+    # Extract first 3 complete sentences
     sentences = []
-    for part in text.split("."):
+    for part in text.replace("\n", " ").split("."):
         part = part.strip()
-        if len(part) > 10:
+        if len(part) > 15:
             sentences.append(part)
         if len(sentences) == 3:
             break
 
     if sentences:
-        text = ". ".join(sentences) + "."
+        return ". ".join(sentences) + "."
 
-    if not text or len(text) < 20:
-        raise ValueError("TinyLlama returned empty or too short response")
+    # If less than 3 sentences came back, return what we have
+    if text and len(text) > 20:
+        return text
 
-    return text
-
-
-# ─────────────────────────────────────────────────────────────
-# BACKEND 2 — Template (always works, no model needed)
-# ─────────────────────────────────────────────────────────────
-def _refine_with_template(caption: str, disease_label: str,
-                           top_diseases: list = None) -> str:
-    """
-    Template-based report — always works even without any LLM.
-    Used as final fallback.
-    """
-    if top_diseases and len(top_diseases) > 0:
-        primary_score = top_diseases[0][1]
-        score_str     = f"{primary_score*100:.1f}%"
-        others        = [d for d, _ in top_diseases[1:] if d != "No Finding"]
-        other_str     = (
-            f"Additional observations include possible "
-            f"{' and '.join(others)} findings."
-            if others else
-            "No additional significant findings are observed."
-        )
-    else:
-        score_str = "N/A"
-        other_str = "No additional significant findings are observed."
-
-    observations = {
-        "Pneumonia"         : "increased opacity and air space consolidation consistent with pneumonia pattern",
-        "Effusion"          : "blunting of the costophrenic angle suggesting pleural fluid accumulation",
-        "Atelectasis"       : "reduced lung volume with plate-like opacity suggesting partial collapse",
-        "Cardiomegaly"      : "enlargement of the cardiac silhouette beyond normal limits",
-        "Consolidation"     : "dense homogeneous opacity consistent with consolidation",
-        "Edema"             : "bilateral perihilar haziness and vascular prominence",
-        "Emphysema"         : "hyperinflated lung fields with flattened diaphragm",
-        "Fibrosis"          : "reticular opacity pattern with reduced lung volume",
-        "Hernia"            : "bowel gas shadow visible above the diaphragm",
-        "Infiltration"      : "patchy haziness in the lung fields",
-        "Mass"              : "a focal opacity with irregular borders noted",
-        "Nodule"            : "a small focal opacity consistent with a pulmonary nodule",
-        "Pleural_Thickening": "thickening along the lateral chest wall pleural surface",
-        "Pneumothorax"      : "a visible pleural line with absence of lung markings peripherally",
-        "No Finding"        : "clear lung fields with no significant abnormalities identified",
-    }
-
-    observation = observations.get(
-        disease_label,
-        f"findings consistent with {disease_label}"
-    )
-
-    return (
-        f"The chest X-ray image demonstrates adequate image quality with "
-        f"the patient in standard positioning for radiographic evaluation. "
-        f"PubMedCLIP analysis with {score_str} similarity confidence identifies "
-        f"{observation} in this examination. "
-        f"{other_str}"
-    )
+    raise ValueError(f"TinyLlama returned unusable output: '{text}'")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -251,11 +215,7 @@ def _refine_with_template(caption: str, disease_label: str,
 def refine_llm(caption: str, disease_label: str,
                top_diseases: list = None) -> dict:
     """
-    Generate structured observational report.
-
-    Tries in order:
-        1. TinyLlama 1.1B Chat  — true LLM, fluent sentences
-        2. Template             — always works, no model needed
+    Generate structured clinical report using TinyLlama LLM.
 
     Args:
         caption       : PubMedCLIP disease description
@@ -264,39 +224,30 @@ def refine_llm(caption: str, disease_label: str,
 
     Returns:
         {
-            "report"        : str,
-            "backend"       : str,   "tinyllama" or "template"
-            "response_time" : float  seconds
+            "report"        : str   generated clinical report
+            "backend"       : str   "tinyllama"
+            "response_time" : float seconds
         }
     """
     start = time.time()
 
-    # Try TinyLlama first
-    print(f"  [LLM] Using TinyLlama 1.1B Chat")
-    if load_tinyllama():
-        try:
-            report  = _refine_with_tinyllama(caption, disease_label, top_diseases)
-            backend = "tinyllama"
-            print(f"  [LLM] TinyLlama report generated successfully")
-            return {
-                "report"        : report,
-                "backend"       : backend,
-                "response_time" : round(time.time() - start, 3),
-            }
-        except Exception as e:
-            print(f"  [LLM] TinyLlama generation failed: {e}")
-            print(f"  [LLM] Switching to template fallback...")
+    print(f"  [LLM] Generating report with TinyLlama...")
 
-    # Template fallback — always works
-    print(f"  [LLM] Using template fallback")
-    report  = _refine_with_template(caption, disease_label, top_diseases)
-    backend = "template"
-    print(f"  [LLM] Template report generated")
+    if not load_tinyllama():
+        raise RuntimeError(
+            "TinyLlama failed to load. "
+            "Check that torch and transformers are installed."
+        )
+
+    report  = _generate(caption, disease_label, top_diseases)
+    elapsed = round(time.time() - start, 3)
+
+    print(f"  [LLM] Report generated in {elapsed}s")
 
     return {
         "report"        : report,
-        "backend"       : backend,
-        "response_time" : round(time.time() - start, 3),
+        "backend"       : "tinyllama",
+        "response_time" : elapsed,
     }
 
 
@@ -305,27 +256,38 @@ def refine_llm(caption: str, disease_label: str,
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 60)
-    print("  LLM Report Generation")
-    print("  Model : TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-    print("  Link  : https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    print("  TinyLlama LLM Report Generation")
+    print(f"  Model : {LLM_MODEL}")
+    print(f"  Device: {DEVICE}")
     print("=" * 60)
 
-    test_caption = "Chest X-Ray showing pneumonia with lobar opacity and consolidation"
-    test_label   = "Pneumonia"
-    test_top     = [
-        ("Pneumonia",   0.72),
-        ("Effusion",    0.18),
-        ("No Finding",  0.10),
+    # Test cases covering different diseases
+    test_cases = [
+        (
+            "Chest X-Ray showing pneumonia with lobar opacity",
+            "Pneumonia",
+            [("Pneumonia", 0.87), ("Consolidation", 0.08)]
+        ),
+        (
+            "Chest X-Ray showing pneumothorax with pleural line",
+            "Pneumothorax",
+            [("Pneumothorax", 0.92), ("Effusion", 0.05)]
+        ),
+        (
+            "Chest X-Ray showing pleural effusion",
+            "Effusion",
+            [("Effusion", 0.78), ("Atelectasis", 0.12)]
+        ),
     ]
 
-    print(f"\n  Disease  : {test_label}")
-    print(f"  Caption  : {test_caption}")
-    print(f"  Top      : {test_top}\n")
+    for caption, label, top in test_cases:
+        print(f"\n  Disease : {label}")
+        print(f"  Caption : {caption}\n")
 
-    result = refine_llm(test_caption, test_label, test_top)
+        result = refine_llm(caption, label, top)
 
-    print(f"\n  Backend       : {result['backend']}")
-    print(f"  Response time : {result['response_time']}s")
-    print(f"\n  Generated Report:")
-    print(f"  {result['report']}")
-    print("=" * 60)
+        print(f"  Backend : {result['backend']}")
+        print(f"  Time    : {result['response_time']}s")
+        print(f"\n  Report:")
+        print(f"  {result['report']}")
+        print("-" * 60)
