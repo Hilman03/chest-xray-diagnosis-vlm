@@ -24,7 +24,7 @@ import io
 import numpy as np
 from datetime import datetime
 
-DEFAULT_API_URL = os.environ.get("API_URL", "http://localhost:8000")
+DEFAULT_API_URL = os.environ.get("API_URL", "https://pampered-enrage-girdle.ngrok-free.dev")
 
 DISEASE_INFO = {
     "Atelectasis"       : "Partial or complete collapse of a lung or lobe.",
@@ -257,18 +257,18 @@ for k, v in {
 # ── API helpers ───────────────────────────────────────────────
 HDR = {"ngrok-skip-browser-warning": "true"}
 
-@st.cache_data(ttl=5, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_reports(api_url):
     try:
         r = requests.get(
             api_url.rstrip("/") + "/reports",
-            headers=HDR, timeout=8
+            headers=HDR, timeout=15
         )
         return r.json() if r.ok else {"total":0,"reports":[]}
     except:
         return {"total":0,"reports":[]}
 
-@st.cache_data(ttl=8, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_health(api_url):
     try:
         r = requests.get(
@@ -593,6 +593,21 @@ with t1:
 # VIEWER
 # ══════════════════════════════════════════════════════════
 with t2:
+    # Auto-load most recent analyzed study if none selected
+    if not st.session_state.study_id:
+        _rj_auto = fetch_reports(st.session_state.api)
+        _analyzed = [r for r in _rj_auto.get("reports", [])
+                     if r.get("status") == "analyzed"]
+        if not _analyzed:
+            _analyzed = _rj_auto.get("reports", [])
+        if _analyzed:
+            _first = list(reversed(_analyzed))[0]
+            st.session_state.study_id = _first["image_id"]
+            _rx = req(f"/report/{_first['image_id']}", t=15)
+            if _rx:
+                st.session_state.report = _rx.json()
+            st.rerun()
+
     if not st.session_state.study_id:
         st.markdown("""
         <div style="height:360px; display:flex; align-items:center;
@@ -609,7 +624,7 @@ with t2:
             </div>
             <div style="font-family:'Inter',sans-serif; font-size:13px;
                         color:#363d4e;">
-                Select from Worklist or upload a new image
+                Upload an image in the Upload tab to begin
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -650,7 +665,8 @@ with t2:
         left, right = st.columns([11,10], gap="large")
 
         with left:
-            ir = req(f"/images/{sid}")
+            with st.spinner("Loading image..."):
+                ir = req(f"/images/{sid}", t=30)
             if ir:
                 # Apply W/L processing
                 processed = wl_img(ir.content)
@@ -890,7 +906,7 @@ with t2:
                             unsafe_allow_html=True)
 
                 # Actions
-                ac1, ac2, ac3 = st.columns(3)
+                ac1, ac2 = st.columns(2)
                 with ac1:
                     if st.button("Export PDF",
                                  use_container_width=True, key="epdf"):
@@ -911,26 +927,21 @@ with t2:
                                 "Run in Colab: !pip install fpdf2 -q"
                             )
                 with ac2:
-                    if st.button("Copy report",
-                                 use_container_width=True, key="cpy"):
-                        st.code(report_text, language=None)
-                        st.caption("Select all and copy")
-                with ac3:
                     if st.button("Run tests",
                                  use_container_width=True, key="tst"):
                         with st.spinner("Running functional tests..."):
-                            tr = req(f"/test/{sid}", t=120)
+                            tr = req(f"/test/{sid}", t=180)
                         if tr:
                             tj = tr.json()
                             sm = tj.get("summary",{})
                             if tj.get("overall")=="PASS":
                                 st.success(
                                     f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed")
+                                    f"tests passed — go to System Tests tab for details")
                             else:
                                 st.error(
                                     f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed")
+                                    f"tests passed — go to System Tests tab for details")
 
                 if st.button("Delete study",
                              use_container_width=True, key="del"):
@@ -1349,59 +1360,66 @@ with t6:
 # SYSTEM TESTS
 # ══════════════════════════════════════════════════════════
 with t7:
-    section("Functionality Test Suite")
+    section("System Functionality Test Suite")
 
     st.markdown("""
     <div style="font-family:'Inter',sans-serif; font-size:13px;
                 color:#6a7385; margin-bottom:20px; line-height:1.8;">
-        Runs all functionality tests against the live backend API.<br>
-        Tests cover: image loading, VLM inference, LLM report generation,
-        full pipeline, API health, and database connectivity.
+        Runs all system tests against the live backend.<br>
+        Covers: image availability, VLM inference (PubMedCLIP),
+        output structure validation, LLM report generation (TinyLlama),
+        full end-to-end pipeline, API health, and database connectivity.
     </div>
     """, unsafe_allow_html=True)
 
-    col_run, col_info = st.columns([1, 3])
-    with col_run:
+    _tc1, _tc2 = st.columns([1, 3])
+    with _tc1:
         run_tests = st.button("Run All Tests", use_container_width=True,
-                              key="run_sys_tests")
-    with col_info:
+                              key="run_sys_tests", type="primary")
+    with _tc2:
         if not ok:
-            st.warning("API is offline — start the backend first.")
+            st.warning("API is offline — start the backend (Colab Cell 8) first.")
+        else:
+            st.info("Backend is online. Click Run All Tests to validate the full system.")
 
     if run_tests:
         if not ok:
             st.error("Cannot run tests — API is offline.")
         else:
-            with st.spinner("Running system tests..."):
-                tr = req("/test", t=180)
+            with st.spinner("Running system tests — this may take 1-2 min on first run while models load..."):
+                tr = req("/test", t=300)
 
             if not tr:
-                st.error("Test endpoint unreachable. Make sure the backend is running.")
+                st.error("Test endpoint unreachable. Make sure Colab Cell 8 is running.")
             else:
-                tj = tr.json()
-                sm = tj.get("summary", {})
+                tj      = tr.json()
+                sm      = tj.get("summary", {})
                 overall = tj.get("overall", "FAIL")
                 tests   = tj.get("tests", [])
 
-                # ── Summary metrics ───────────────────────────────
-                mc1, mc2, mc3, mc4 = st.columns(4)
-                mc1.metric("Overall",  overall)
-                mc2.metric("Passed",   sm.get("passed", 0))
-                mc3.metric("Failed",   sm.get("failed", 0))
-                mc4.metric("Skipped",  sm.get("skipped", 0))
+                # ── Summary bar ───────────────────────────────────
+                pass_rate = (sm.get("passed", 0) / sm.get("total", 1)) * 100
+                _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+                _m1.metric("Result",   overall)
+                _m2.metric("Passed",   sm.get("passed", 0))
+                _m3.metric("Failed",   sm.get("failed", 0))
+                _m4.metric("Skipped",  sm.get("skipped", 0))
+                _m5.metric("Pass Rate", f"{pass_rate:.0f}%")
 
-                st.markdown("<div style='height:16px'></div>",
+                st.markdown("<div style='height:12px'></div>",
                             unsafe_allow_html=True)
 
                 if overall == "PASS":
                     st.success(
                         f"All {sm.get('passed')} tests passed — "
-                        f"system is functioning correctly."
+                        f"system is fully functional."
                     )
                 else:
+                    failed_names = [t.get("name") for t in tests
+                                    if t.get("status") == "FAIL"]
                     st.error(
-                        f"{sm.get('failed')} test(s) failed — "
-                        f"see details below."
+                        f"{sm.get('failed')} test(s) failed: "
+                        f"{', '.join(failed_names)}"
                     )
 
                 st.markdown("<div style='height:16px'></div>",
@@ -1409,66 +1427,88 @@ with t7:
                 section("Test Results")
 
                 # ── Individual test rows ──────────────────────────
-                for t in tests:
-                    status = t.get("status", "FAIL")
-                    if status == "PASS":
-                        dot_col  = "#4abe4a"
-                        bg_col   = "#162316"
-                        bdr_col  = "#265626"
-                        lbl_col  = "#72c472"
-                    elif status == "SKIP":
-                        dot_col  = "#6a7385"
-                        bg_col   = "#1a1e26"
-                        bdr_col  = "#2e3442"
-                        lbl_col  = "#6a7385"
+                for _t in tests:
+                    _status = _t.get("status", "FAIL")
+                    if _status == "PASS":
+                        _dot = "#4abe4a"; _bg = "#162316"
+                        _bdr = "#265626"; _lbl = "#72c472"
+                    elif _status == "SKIP":
+                        _dot = "#6a7385"; _bg = "#1a1e26"
+                        _bdr = "#2e3442"; _lbl = "#6a7385"
                     else:
-                        dot_col  = "#e07070"
-                        bg_col   = "#231616"
-                        bdr_col  = "#562626"
-                        lbl_col  = "#e07878"
+                        _dot = "#e07070"; _bg = "#231616"
+                        _bdr = "#562626"; _lbl = "#e07878"
 
-                    extra_html = ""
-                    if status == "PASS" and "disease_label" in t:
-                        scores_html = "".join(
-                            f'<span style="margin-right:12px;">'
-                            f'{d} <b style="color:#72c472;">'
-                            f'{int(s*100)}%</b></span>'
-                            for d, s in t.get("top_diseases", [])[:3]
+                    # Extra info: disease scores for VLM test
+                    _extra = ""
+                    if _status == "PASS" and "top_diseases" in _t:
+                        _scores = "".join(
+                            f'<span style="margin-right:10px; color:#c8d0e0;">'
+                            f'{d} <b style="color:#72c472;">{int(s*100)}%</b></span>'
+                            for d, s in _t.get("top_diseases", [])[:3]
                         )
-                        extra_html = f"""
-                        <div style="margin-top:6px; font-family:'JetBrains Mono',
-                                    monospace; font-size:11px; color:#5a8a5a;">
-                            {scores_html}
-                        </div>"""
+                        _extra = (
+                            f'<div style="margin-top:5px; padding-left:18px; '
+                            f'font-family:\'JetBrains Mono\',monospace; font-size:11px;">'
+                            f'{_scores}</div>'
+                        )
+
+                    # Timing badge
+                    _time_badge = ""
+                    if "response_time" in _t:
+                        _time_badge = (
+                            f'<span style="font-family:\'JetBrains Mono\',monospace; '
+                            f'font-size:10px; color:#4a5368; margin-left:8px;">'
+                            f'{_t["response_time"]}s</span>'
+                        )
 
                     st.markdown(f"""
-                    <div style="background:{bg_col}; border:1px solid {bdr_col};
-                                border-radius:6px; padding:12px 16px;
-                                margin-bottom:8px;">
-                        <div style="display:flex; align-items:center; gap:10px;
-                                    margin-bottom:4px;">
+                    <div style="background:{_bg}; border:1px solid {_bdr};
+                                border-radius:6px; padding:11px 16px;
+                                margin-bottom:6px;">
+                        <div style="display:flex; align-items:center; gap:10px;">
                             <span style="width:8px; height:8px; border-radius:50%;
-                                         background:{dot_col}; display:inline-block;
-                                         flex-shrink:0;"></span>
-                            <span style="font-family:'Inter',sans-serif;
-                                         font-size:13px; font-weight:600;
-                                         color:{lbl_col}; flex:1;">{t.get('name')}</span>
+                                         background:{_dot}; flex-shrink:0;
+                                         display:inline-block;"></span>
+                            <span style="font-family:'Inter',sans-serif; font-size:13px;
+                                         font-weight:600; color:{_lbl}; flex:1;">
+                                {_t.get('name')}
+                            </span>
+                            {_time_badge}
                             <span style="font-family:'JetBrains Mono',monospace;
                                          font-size:11px; font-weight:700;
-                                         color:{dot_col};">{status}</span>
+                                         color:{_dot};">{_status}</span>
                         </div>
-                        <div style="font-family:'JetBrains Mono',monospace;
-                                    font-size:11px; color:#4a5368;
-                                    padding-left:18px;">
-                            {t.get('detail', '')}
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
+                                    color:#4a5368; padding-left:18px; margin-top:3px;
+                                    word-break:break-word;">
+                            {_t.get('detail', '')}
                         </div>
-                        {extra_html}
+                        {_extra}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # ── LLM Report preview if available ──────────────
+                _llm_test = next(
+                    (t for t in tests if "LLM" in t.get("name", "")), None
+                )
+                if _llm_test and _llm_test.get("status") == "PASS":
+                    st.markdown("<div style='height:10px'></div>",
+                                unsafe_allow_html=True)
+                    section("TinyLlama Sample Report (from test run)")
+                    st.markdown(f"""
+                    <div style="background:#232830; border:1px solid #2e3442;
+                                border-left:3px solid #4d8ef0; border-radius:6px;
+                                padding:14px 16px; font-family:'Inter',sans-serif;
+                                font-size:13px; color:#d8dce8; line-height:1.8;">
+                        {_llm_test.get('detail', '—')}
                     </div>
                     """, unsafe_allow_html=True)
 
                 st.markdown(f"""
                 <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
-                            color:#363d4e; margin-top:8px;">
-                    Tested: {tj.get('test_date','')[:19].replace('T', '  ')}
+                            color:#363d4e; margin-top:10px;">
+                    Tested: {tj.get('test_date','')[:19].replace('T','  ')}
+                    &nbsp;·&nbsp; {sm.get('total', 0)} tests total
                 </div>
                 """, unsafe_allow_html=True)

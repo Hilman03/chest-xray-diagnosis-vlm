@@ -35,7 +35,7 @@ from transformers import (
 # ─────────────────────────────────────────────────────────────
 LLM_MODEL      = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_NEW_TOKENS = 220
+MAX_NEW_TOKENS = 350
 
 _model     = None
 _tokenizer = None
@@ -81,55 +81,25 @@ def load_tinyllama() -> bool:
 def _build_prompt(caption: str, disease_label: str,
                   top_diseases: list = None) -> str:
     """
-    Build TinyLlama chat prompt.
-
-    TinyLlama chat template:
-        <|system|> ... </s>
-        <|user|>   ... </s>
-        <|assistant|>
-
-    The prompt is designed to:
-    - Focus on clinical observation language
-    - Avoid mentioning AI or software systems
-    - Produce exactly 3 structured sentences
-    - Stay neutral and non-diagnostic
+    Minimal TinyLlama chat prompt — pure LLM generation, no strict template.
+    Lets TinyLlama generate naturally from its own training.
     """
-    # Format confidence scores
-    if top_diseases and len(top_diseases) > 0:
-        top_score = f"{top_diseases[0][1]*100:.0f}%"
-        other_findings = ", ".join(
-            d for d, _ in top_diseases[1:]
-            if d != "No Finding"
+    findings_str = ""
+    if top_diseases and len(top_diseases) > 1:
+        findings_str = ", ".join(
+            f"{d} ({s*100:.0f}%)" for d, s in top_diseases[:3]
         )
-    else:
-        top_score      = "high"
-        other_findings = ""
 
     system_msg = (
-        "You are a radiologist assistant. "
-        "You write short, factual, 3-sentence chest X-ray "
-        "observational reports in plain clinical language. "
-        "You describe what is visually observed. "
-        "You never diagnose. You never mention software or AI. "
-        "You write in neutral, professional radiology language."
+        "You are a radiologist writing chest X-ray observation reports. "
+        "Write in clear, professional clinical language."
     )
 
     user_msg = (
-        f"Write a 3-sentence chest X-ray observational report "
-        f"for a patient whose X-ray shows {disease_label} "
-        f"with {top_score} detection confidence.\n\n"
+        f"Write a chest X-ray observation report.\n"
+        f"Primary finding: {disease_label}\n"
         f"Visual description: {caption}\n"
-        + (f"Additional findings considered: {other_findings}\n"
-           if other_findings else "") +
-        f"\nFormat your response as exactly 3 sentences:\n"
-        f"Sentence 1: Describe the overall image quality and "
-        f"patient positioning.\n"
-        f"Sentence 2: Describe the specific radiographic findings "
-        f"related to {disease_label}.\n"
-        f"Sentence 3: Note any additional observations or confirm "
-        f"no other significant abnormalities.\n\n"
-        f"Rules: exactly 3 sentences, neutral clinical language, "
-        f"no diagnosis, no treatment advice, no mention of AI or software."
+        + (f"Confidence scores: {findings_str}\n" if findings_str else "")
     )
 
     return (
@@ -187,23 +157,11 @@ def _generate(caption: str, disease_label: str,
         skip_special_tokens=True
     ).strip()
 
-    # Clean leftover chat tags
+    # Remove leftover chat tags
     for tag in ["<|system|>", "<|user|>", "<|assistant|>", "</s>"]:
         text = text.replace(tag, "").strip()
 
-    # Extract first 3 complete sentences
-    sentences = []
-    for part in text.replace("\n", " ").split("."):
-        part = part.strip()
-        if len(part) > 15:
-            sentences.append(part)
-        if len(sentences) == 3:
-            break
-
-    if sentences:
-        return ". ".join(sentences) + "."
-
-    # If less than 3 sentences came back, return what we have
+    # Return full natural output from TinyLlama
     if text and len(text) > 20:
         return text
 

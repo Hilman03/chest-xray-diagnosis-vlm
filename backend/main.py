@@ -268,7 +268,15 @@ async def startup_event():
         load_model()
         print("  [Startup] PubMedCLIP ready")
     except Exception as e:
-        print(f"  [Startup] Model pre-load skipped: {e}")
+        print(f"  [Startup] PubMedCLIP pre-load skipped: {e}")
+
+    print("  [Startup] Pre-loading TinyLlama model...")
+    try:
+        from llm_refine import load_tinyllama
+        load_tinyllama()
+        print("  [Startup] TinyLlama ready")
+    except Exception as e:
+        print(f"  [Startup] TinyLlama pre-load skipped: {e}")
 
     print("  [Startup] API ready!")
     print("=" * 55)
@@ -785,13 +793,30 @@ async def run_system_tests():
     # ── Test 1: sample image available ───────────────────────
     images_dir = ROOT / "data" / "processed" / "images"
     sample_images = sorted(images_dir.glob("*.png"))
+
+    # Fallback: use any uploaded image if processed folder is empty
+    if not sample_images:
+        upload_pngs = [
+            p for p in sorted(UPLOAD_DIR.glob("*.png"))
+            if "_raw" not in p.name
+        ]
+        sample_images = upload_pngs
+
+    # Fallback 2: use any analyzed record from database
+    if not sample_images:
+        for rec in list_records():
+            p = rec.get("image_path", "")
+            if p and Path(p).exists():
+                sample_images = [Path(p)]
+                break
+
     if sample_images:
         _r("Sample Images Available", "PASS",
-           f"{len(sample_images)} image(s) in data/processed/images/")
+           f"{len(sample_images)} image(s) found")
         image_path = str(sample_images[0])
     else:
         _r("Sample Images Available", "FAIL",
-           "No images in data/processed/images/ — run scripts/preprocess.py")
+           "No images found — upload an image via POST /upload first")
         image_path = None
 
     # ── Test 2: image loadable ────────────────────────────────
@@ -815,7 +840,7 @@ async def run_system_tests():
             vlm_result = infer_vlm_with_label(image_path)
             elapsed = round(time.time() - t0, 3)
             _r("VLM Inference (PubMedCLIP)", "PASS",
-               f"Disease: {vlm_result['disease_label']}  Time: {elapsed}s",
+               f"Primary: {vlm_result['disease_label']}  |  Time: {elapsed}s",
                disease_label=vlm_result["disease_label"],
                top_diseases=vlm_result["top_diseases"],
                response_time=elapsed)
@@ -853,14 +878,14 @@ async def run_system_tests():
                 vlm_result["top_diseases"],
             )
             elapsed = round(time.time() - t0, 3)
-            _r("LLM Report Generation", "PASS",
-               f"Length: {len(llm_result['report'])} chars  Time: {elapsed}s",
+            _r("LLM Report Generation (TinyLlama)", "PASS",
+               llm_result["report"],
                backend=llm_result["backend"],
                response_time=elapsed)
         except Exception as e:
-            _r("LLM Report Generation", "FAIL", str(e))
+            _r("LLM Report Generation (TinyLlama)", "FAIL", str(e))
     else:
-        _r("LLM Report Generation", "SKIP", "VLM did not produce output")
+        _r("LLM Report Generation (TinyLlama)", "SKIP", "VLM did not produce output")
 
     # ── Test 6: full pipeline end-to-end ─────────────────────
     if image_path:
