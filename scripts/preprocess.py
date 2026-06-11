@@ -1,10 +1,7 @@
 """
-phase1_preprocess.py
-====================
+preprocess.py
+=============
 Phase 1 - Dataset & Preprocessing for NIH ChestX-ray14
-
-Place this file at:
-    C:/Users/hilma/OneDrive/Documents/DEGREE/SEM 6/CSP650/CODE/phase1_preprocess.py
 
 Expected folder structure:
     data/
@@ -16,12 +13,11 @@ Expected folder structure:
             Data_Entry_2017.csv
             BBox_List_2017.csv
 
-Run from terminal:
-    cd "C:/Users/hilma/OneDrive/Documents/DEGREE/SEM 6/CSP650/CODE"
-    python phase1_preprocess.py
+Run from project root:
+    python scripts/preprocess.py
 
 Install dependencies first:
-    pip install numpy pandas pillow opencv-python pydicom
+    pip install -r requirements.txt
 """
 
 import os

@@ -1,11 +1,26 @@
-astapi
-uvicorn
+# Core framework
+fastapi
+uvicorn[standard]
 streamlit
-transformers
+
+# AI / ML
 torch
+torchvision
+transformers
+accelerate
+
+# Image processing
 pillow
-pymongo
-python-multipart
-pydicom
 opencv-python
+pydicom
+
+# Database & storage
+pymongo
+python-dotenv
+
+# API utilities
+python-multipart
 requests
+
+# PDF export
+fpdf2

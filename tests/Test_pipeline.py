@@ -21,7 +21,7 @@ from unittest.mock import patch
 def sample_image_path():
     images = sorted((ROOT / "data" / "processed" / "images").glob("*.png"))
     if not images:
-        pytest.skip("No processed images — run phase1_preprocess.py first")
+        pytest.skip("No processed images — run scripts/preprocess.py first")
     return str(images[0])
 
 
@@ -112,25 +112,40 @@ class TestVLMInference:
 # LLM (mocked)
 # ─────────────────────────────────────────────────────────────
 class TestLLMRefine:
+    def _mock_generate(self, caption, label, top=None):
+        return "Good image. Pneumonia findings visible. No other significant abnormalities."
+
     def test_returns_dict(self, sample_caption, sample_label, sample_top_diseases):
         from models.llm_refine import refine_llm
-        mock_out = [{"generated_text": "Good image. Pneumonia findings. No other issues."}]
-        with patch("models.llm_refine._is_ollama_running", return_value=False), \
-             patch("models.llm_refine._load_hf_pipeline"), \
-             patch("models.llm_refine._hf_pipeline", return_value=mock_out):
+        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+             patch("models.llm_refine._generate", return_value=self._mock_generate(
+                 sample_caption, sample_label, sample_top_diseases)):
             result = refine_llm(sample_caption, sample_label, sample_top_diseases)
         assert "report" in result
         assert "backend" in result
         assert "response_time" in result
 
-    def test_backend_valid(self, sample_caption, sample_label):
+    def test_backend_is_tinyllama(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        mock_out = [{"generated_text": "Test output."}]
-        with patch("models.llm_refine._is_ollama_running", return_value=False), \
-             patch("models.llm_refine._load_hf_pipeline"), \
-             patch("models.llm_refine._hf_pipeline", return_value=mock_out):
+        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+             patch("models.llm_refine._generate", return_value=self._mock_generate(
+                 sample_caption, sample_label)):
             result = refine_llm(sample_caption, sample_label)
-        assert result["backend"] in ("ollama", "huggingface")
+        assert result["backend"] == "tinyllama"
+
+    def test_report_not_empty(self, sample_caption, sample_label):
+        from models.llm_refine import refine_llm
+        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+             patch("models.llm_refine._generate", return_value=self._mock_generate(
+                 sample_caption, sample_label)):
+            result = refine_llm(sample_caption, sample_label)
+        assert len(result["report"]) > 20
+
+    def test_load_failure_raises(self, sample_caption, sample_label):
+        from models.llm_refine import refine_llm
+        with patch("models.llm_refine.load_tinyllama", return_value=False):
+            with pytest.raises(RuntimeError):
+                refine_llm(sample_caption, sample_label)
 
 
 # ─────────────────────────────────────────────────────────────

@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+
+# Jupyter / Colab
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
 
 # VS Code
 .vscode/
@@ -39,11 +44,10 @@ sample_data/
 venv/
 env/
 
-# Docker
-docker-compose.yml
-dockerline
 
-# Logs & text outputs
+# Logs & outputs
 *.log
 *.csv
 *.xlsx
+tests/test_report.json
+tests/test_report.txt

@@ -110,7 +110,7 @@ if __name__ == "__main__":
     images     = sorted(images_dir.glob("*.png"))
 
     if not images:
-        print(f"  No images found. Run phase1_preprocess.py first.")
+        print(f"  No images found. Run scripts/preprocess.py first.")
         sys.exit(1)
 
     test_image = str(images[0])

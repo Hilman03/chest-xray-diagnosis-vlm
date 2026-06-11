@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
     if not images:
         print(f"  No images found in {images_dir}")
-        print(f"  Run phase1_preprocess.py first.")
+        print(f"  Run scripts/preprocess.py first.")
         sys.exit(1)
 
     # Test on first 3 images to see variety

@@ -1,6 +1,0 @@
-C:\Users\hilma\OneDrive\Documents\DEGREE\SEM 6\CSP650\CODE>cd "C:\Users\hilma\OneDrive\Documents\DEGREE\SEM 6\CSP650\CODE"
-
-C:\Users\hilma\OneDrive\Documents\DEGREE\SEM 6\CSP650\CODE>python phase1_preprocess.py
-
-Huggin  VLM:https://huggingface.co/nlpconnect/vit-gpt2-image-captioning
-HUGGIN FACE LLM :https://huggingface.co/facebook/opt-1.3b

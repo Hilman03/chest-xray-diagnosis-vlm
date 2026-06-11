@@ -30,7 +30,7 @@ def run_sample_test():
 
     if not all_images:
         print(f"  ERROR: No images in {IMAGES_DIR}")
-        print(f"  Run phase1_preprocess.py first.")
+        print(f"  Run scripts/preprocess.py first.")
         sys.exit(1)
 
     samples       = all_images[:N_SAMPLES]

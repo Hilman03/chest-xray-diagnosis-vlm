@@ -58,9 +58,10 @@ def load_tinyllama() -> bool:
         print(f"  [LLM] First run downloads ~600MB — please wait...")
 
         _tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
-        _model     = AutoModelForCausalLM.from_pretrained(
+        dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+        _model = AutoModelForCausalLM.from_pretrained(
             LLM_MODEL,
-            dtype=torch.float32,
+            torch_dtype=dtype,
             low_cpu_mem_usage=True,
         )
         _model.to(DEVICE)
