@@ -91,15 +91,21 @@ def _build_prompt(caption: str, disease_label: str,
         )
 
     system_msg = (
-        "You are a radiologist writing chest X-ray observation reports. "
-        "Write in clear, professional clinical language."
+        "You are a radiologist writing a factual chest X-ray observation report. "
+        "Describe only what is radiographically observed for the stated finding. "
+        "Use precise clinical language. Do not invent unrelated findings, "
+        "patient history, or treatment advice. Stay concise and on-topic."
     )
 
     user_msg = (
-        f"Write a chest X-ray observation report.\n"
-        f"Primary finding: {disease_label}\n"
-        f"Visual description: {caption}\n"
-        + (f"Confidence scores: {findings_str}\n" if findings_str else "")
+        f"Write a focused chest X-ray observation report about: {disease_label}.\n"
+        f"Radiographic basis: {caption}\n"
+        + (f"Model confidence: {findings_str}\n" if findings_str else "") +
+        f"\nStructure the report as:\n"
+        f"1. Image technique and quality.\n"
+        f"2. Specific radiographic findings of {disease_label}.\n"
+        f"3. Brief impression.\n"
+        f"Keep it factual and specific to {disease_label}."
     )
 
     return (
@@ -132,13 +138,13 @@ def _generate(caption: str, disease_label: str,
 
     input_length = inputs["input_ids"].shape[1]
 
-    # Generation config — multinomial sampling
+    # Generation config — low temperature for focused, less-random output
     gen_config = GenerationConfig(
         max_new_tokens    = MAX_NEW_TOKENS,
         do_sample         = True,
         num_beams         = 1,
-        temperature       = 0.4,     # lower = more focused
-        top_p             = 0.85,    # nucleus sampling
+        temperature       = 0.25,    # lower = more deterministic / specific
+        top_p             = 0.80,    # tighter nucleus sampling
         repetition_penalty= 1.3,     # avoid repeating phrases
         pad_token_id      = _tokenizer.eos_token_id,
         eos_token_id      = _tokenizer.eos_token_id,

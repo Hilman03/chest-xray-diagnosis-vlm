@@ -239,6 +239,7 @@ details > summary:hover { border-color: #4d8ef0 !important; color: #fff !importa
 # ── Session state ─────────────────────────────────────────────
 for k, v in {
     "api"        : DEFAULT_API_URL,
+    "page"       : "cover",
     "study_id"   : None,
     "report"     : None,
     "ok"         : False,
@@ -421,24 +422,77 @@ st.markdown(f"""
 if not ok:
     st.warning(
         "API is offline. Go to Settings, update the API URL, "
-        "and click Save. Make sure Colab Cell 10 is running."
+        "and click Save. Make sure Colab Cell 8 is running."
     )
 
-# ── Tabs ──────────────────────────────────────────────────────
-t1,t2,t3,t4,t5,t6,t7 = st.tabs([
-    "Worklist",
-    "Viewer",
-    "Compare",
-    "Upload",
-    "History",
-    "Settings",
-    "System Tests",
-])
+# ── Cover / landing page ──────────────────────────────────────
+PAGES = ["worklist", "viewer", "upload", "history", "settings", "tests"]
+PAGE_LABELS = {
+    "worklist": "Worklist", "viewer": "Viewer", "upload": "Upload",
+    "history": "History", "settings": "Settings", "tests": "System Tests",
+}
+
+if st.session_state.page == "cover":
+    st.markdown(f"""
+    <div style="margin-top:30px; padding:48px 40px; text-align:center;
+                background:linear-gradient(160deg,#1e2430 0%,#232830 100%);
+                border:1px solid #2e3442; border-radius:14px;">
+        <div style="font-family:'Inter',sans-serif; font-size:40px;
+                    font-weight:700; color:#ffffff; letter-spacing:-0.5px;">
+            CXR AI-PACS
+        </div>
+        <div style="font-family:'Inter',sans-serif; font-size:16px;
+                    color:#8a93a6; margin-top:10px;">
+            AI-Assisted Chest X-Ray Analysis & Reporting Workstation
+        </div>
+        <div style="width:60px; height:3px; background:#4d8ef0;
+                    margin:24px auto; border-radius:2px;"></div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px;
+                    color:#5a6478; line-height:2;">
+            PubMedCLIP &nbsp;·&nbsp; TinyLlama 1.1B &nbsp;·&nbsp; NIH ChestX-ray14<br>
+            DICOM Viewer &nbsp;·&nbsp; Structured Reporting &nbsp;·&nbsp; PDF Export
+        </div>
+        <div style="font-family:'Inter',sans-serif; font-size:13px;
+                    color:{'#72c472' if ok else '#e07878'}; margin-top:20px;">
+            Backend: {'Connected' if ok else 'Offline — configure in Settings after entering'}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _cc1, _cc2, _cc3 = st.columns([1, 1, 1])
+    with _cc2:
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+        if st.button("Enter Workstation", use_container_width=True,
+                     type="primary", key="enter_btn"):
+            st.session_state.page = "worklist"
+            st.rerun()
+
+    st.markdown("""
+    <div style="margin-top:28px; text-align:center; font-family:'Inter',sans-serif;
+                font-size:11px; color:#3a4250;">
+        For demonstration and educational purposes only — not for clinical use.
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# ── Page navigation bar ───────────────────────────────────────
+_nav = st.columns(len(PAGES))
+for _i, _pg in enumerate(PAGES):
+    with _nav[_i]:
+        if st.button(PAGE_LABELS[_pg], key=f"nav_{_pg}",
+                     use_container_width=True,
+                     type="primary" if st.session_state.page == _pg
+                          else "secondary"):
+            st.session_state.page = _pg
+            st.rerun()
+
+st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+PAGE = st.session_state.page
 
 # ══════════════════════════════════════════════════════════
 # WORKLIST
 # ══════════════════════════════════════════════════════════
-with t1:
+if PAGE == "worklist":
     rj  = fetch_reports(st.session_state.api)
     rps = rj.get("reports",[])
     ana = sum(1 for r in rps if r.get("status")=="analyzed")
@@ -572,11 +626,13 @@ with t1:
             with btn:
                 if st.button("Open", key=f"w{r.get('image_id')}",
                              use_container_width=True):
-                    st.session_state.study_id = r.get("image_id")
-                    rx = req(f"/report/{r.get('image_id')}")
-                    if rx:
-                        st.session_state.report = rx.json()
-                    add_recent(r.get("image_id"))
+                    with st.spinner("Opening study..."):
+                        st.session_state.study_id = r.get("image_id")
+                        rx = req(f"/report/{r.get('image_id')}")
+                        if rx:
+                            st.session_state.report = rx.json()
+                        add_recent(r.get("image_id"))
+                    st.session_state.page = "viewer"
                     st.rerun()
 
     # Recently opened
@@ -594,17 +650,19 @@ with t1:
             with rcols[i]:
                 if st.button(f"...{rid[-8:]}", key=f"rec{rid}",
                              use_container_width=True):
-                    st.session_state.study_id = rid
-                    rx = req(f"/report/{rid}")
-                    if rx:
-                        st.session_state.report = rx.json()
+                    with st.spinner("Opening study..."):
+                        st.session_state.study_id = rid
+                        rx = req(f"/report/{rid}")
+                        if rx:
+                            st.session_state.report = rx.json()
+                    st.session_state.page = "viewer"
                     st.rerun()
 
 
 # ══════════════════════════════════════════════════════════
 # VIEWER
 # ══════════════════════════════════════════════════════════
-with t2:
+if PAGE == "viewer":
     # Auto-load most recent analyzed study if none selected
     if not st.session_state.study_id:
         _rj_auto = fetch_reports(st.session_state.api)
@@ -636,7 +694,7 @@ with t2:
             </div>
             <div style="font-family:'Inter',sans-serif; font-size:13px;
                         color:#363d4e;">
-                Upload an image in the Upload tab to begin
+                Open a study from the Worklist or upload a new image
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -915,20 +973,21 @@ with t2:
                             if tj.get("overall")=="PASS":
                                 st.success(
                                     f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed — go to System Tests tab for details")
+                                    f"tests passed — see System Tests page for details")
                             else:
                                 st.error(
                                     f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed — go to System Tests tab for details")
+                                    f"tests passed — see System Tests page for details")
 
                 if st.button("Delete study",
                              use_container_width=True, key="del"):
-                    dx = req(f"/report/{sid}",
-                             method="DELETE", no_cache=True)
+                    with st.spinner("Deleting study..."):
+                        dx = req(f"/report/{sid}",
+                                 method="DELETE", no_cache=True)
                     if dx:
                         st.session_state.study_id = None
                         st.session_state.report   = None
-                        st.success("Study deleted successfully")
+                        st.session_state.page     = "worklist"
                         st.rerun()
                     else:
                         st.error("Delete failed")
@@ -946,90 +1005,9 @@ with t2:
 
 
 # ══════════════════════════════════════════════════════════
-# COMPARE
-# ══════════════════════════════════════════════════════════
-with t3:
-    section("Side-by-Side Study Comparison")
-
-    rj2  = fetch_reports(st.session_state.api)
-    opts = {
-        f"{r.get('filename','?')[:30]} ({r.get('disease_label','—')})":
-        r.get("image_id")
-        for r in rj2.get("reports",[])
-        if r.get("status")=="analyzed"
-    }
-
-    if len(opts) < 2:
-        st.markdown("""
-        <div style="background:#232830; border:1px solid #2e3442;
-                    border-radius:8px; padding:32px; text-align:center;
-                    color:#4a5368; font-size:14px;">
-            At least 2 analyzed studies are required for comparison.
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        cp1, cp2 = st.columns(2)
-        with cp1:
-            s1 = st.selectbox("Study A", list(opts.keys()), key="cmp1")
-        with cp2:
-            s2 = st.selectbox(
-                "Study B",
-                [k for k in opts.keys() if k != s1],
-                key="cmp2"
-            )
-
-        if s1 and s2:
-            cl, cr = st.columns(2, gap="large")
-            for col, iid, lbl in [(cl,opts[s1],s1),(cr,opts[s2],s2)]:
-                with col:
-                    img_bytes = fetch_image_bytes(st.session_state.api, iid)
-                    rp  = req(f"/report/{iid}")
-                    rj3 = rp.json() if rp else {}
-                    dis3 = rj3.get("disease_label","—")
-                    urg3, uc3 = URGENCY.get(dis3, ("ROUTINE","#6abe6a"))
-
-                    st.markdown(f"""
-                    <div style="background:#232830; border:1px solid #2e3442;
-                                border-bottom:none; border-radius:8px 8px 0 0;
-                                padding:8px 14px; display:flex;
-                                justify-content:space-between; align-items:center;">
-                        <span style="font-family:'Inter',sans-serif; font-size:13px;
-                                     font-weight:500; color:#c8d0e0;
-                                     overflow:hidden; text-overflow:ellipsis;
-                                     white-space:nowrap; max-width:180px;">
-                            {lbl[:28]}
-                        </span>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <span style="font-family:'Inter',sans-serif;
-                                         font-size:11px; font-weight:600;
-                                         color:{uc3};">{urg3}</span>
-                            <span style="font-family:'Inter',sans-serif;
-                                         font-size:13px; font-weight:600;
-                                         color:#72c472;">{dis3}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if img_bytes:
-                        st.image(
-                            Image.open(io.BytesIO(img_bytes)),
-                            use_container_width=True
-                        )
-                    rep3 = rj3.get("llm_report","—")
-                    st.markdown(f"""
-                    <div style="background:#232830; border:1px solid #2e3442;
-                                border-top:none; border-radius:0 0 8px 8px;
-                                padding:10px 14px; font-family:'Inter',sans-serif;
-                                font-size:12px; color:#8a93a6; line-height:1.7;">
-                        {rep3[:200]}{'...' if len(rep3)>200 else ''}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════
 # UPLOAD
 # ══════════════════════════════════════════════════════════
-with t4:
+if PAGE == "upload":
     uc1, uc2 = st.columns([1,1], gap="large")
 
     with uc1:
@@ -1122,7 +1100,10 @@ with t4:
                         st.error(e)
 
                 if results:
-                    st.info("Switch to the Viewer tab to see the full reports")
+                    if st.button("Open in Viewer", use_container_width=True,
+                                 type="primary", key="upload_to_viewer"):
+                        st.session_state.page = "viewer"
+                        st.rerun()
 
     with uc2:
         section("Preview")
@@ -1169,7 +1150,7 @@ with t4:
 # ══════════════════════════════════════════════════════════
 # HISTORY
 # ══════════════════════════════════════════════════════════
-with t5:
+if PAGE == "history":
     rj3 = fetch_reports(st.session_state.api)
     rp3 = rj3.get("reports",[])
 
@@ -1189,55 +1170,88 @@ with t5:
         </div>
         """, unsafe_allow_html=True)
     else:
+        # Collect which studies are checked this run
+        selected_ids = []
+
+        # ── Bulk action bar ───────────────────────────────────
+        ba1, ba2 = st.columns([3, 1])
+        with ba2:
+            delete_selected = st.button(
+                "Delete Selected", use_container_width=True,
+                key="bulk_del", type="primary"
+            )
+
         for r in reversed(rp3):
+            iid  = r.get("image_id")
             dis4 = r.get("disease_label","—")
             urg4, uc4 = URGENCY.get(dis4,("ROUTINE","#6abe6a"))
-            lbl = (
-                f"{r.get('filename','?')}  |  "
-                f"{dis4}  |  {urg4}  |  "
-                f"{r.get('status','').upper()}"
-            )
-            with st.expander(lbl):
-                hc1, hc2 = st.columns(2)
-                with hc1:
-                    sc2 = "#72c472" if r.get("status")=="analyzed" else "#d4aa50"
-                    data_row("Study ID",   r.get("image_id","")[:14]+"...")
-                    data_row("Status",     r.get("status","").upper(),
-                             color=sc2)
-                    data_row("DICOM",      "Yes" if r.get("is_dicom") else "No")
-                    data_row("Total time", f"{r.get('total_time',0)}s",
-                             border=False)
-                with hc2:
-                    data_row("Finding",   dis4,  color="#72c472")
-                    data_row("Priority",  urg4,  color=uc4)
-                    data_row("Uploaded",  (r.get("uploaded_at") or "")[:16])
-                    data_row("Analyzed",  (r.get("analyzed_at") or "")[:16],
-                             border=False)
 
-                hb1, hb2 = st.columns(2)
-                with hb1:
-                    if st.button("Open in Viewer",
-                                 key=f"ho{r.get('image_id')}",
-                                 use_container_width=True):
-                        st.session_state.study_id = r.get("image_id")
-                        rx = req(f"/report/{r.get('image_id')}")
-                        if rx:
-                            st.session_state.report = rx.json()
-                        add_recent(r.get("image_id"))
-                        st.info("Switch to the Viewer tab")
-                with hb2:
-                    if st.button("Delete",
-                                 key=f"hd{r.get('image_id')}",
-                                 use_container_width=True):
-                        req(f"/report/{r.get('image_id')}",
-                            method="DELETE", no_cache=True)
-                        st.rerun()
+            row_chk, row_exp = st.columns([1, 11])
+            with row_chk:
+                if st.checkbox(" ", key=f"chk_{iid}",
+                               label_visibility="collapsed"):
+                    selected_ids.append(iid)
+            with row_exp:
+                lbl = (
+                    f"{r.get('filename','?')}  |  "
+                    f"{dis4}  |  {urg4}  |  "
+                    f"{r.get('status','').upper()}"
+                )
+                with st.expander(lbl):
+                    hc1, hc2 = st.columns(2)
+                    with hc1:
+                        sc2 = "#72c472" if r.get("status")=="analyzed" else "#d4aa50"
+                        data_row("Study ID",   (iid or "")[:14]+"...")
+                        data_row("Status",     r.get("status","").upper(),
+                                 color=sc2)
+                        data_row("DICOM",      "Yes" if r.get("is_dicom") else "No")
+                        data_row("Total time", f"{r.get('total_time',0)}s",
+                                 border=False)
+                    with hc2:
+                        data_row("Finding",   dis4,  color="#72c472")
+                        data_row("Priority",  urg4,  color=uc4)
+                        data_row("Uploaded",  (r.get("uploaded_at") or "")[:16])
+                        data_row("Analyzed",  (r.get("analyzed_at") or "")[:16],
+                                 border=False)
+
+                    hb1, hb2 = st.columns(2)
+                    with hb1:
+                        if st.button("Open in Viewer",
+                                     key=f"ho{iid}",
+                                     use_container_width=True):
+                            with st.spinner("Opening study..."):
+                                st.session_state.study_id = iid
+                                rx = req(f"/report/{iid}")
+                                if rx:
+                                    st.session_state.report = rx.json()
+                                add_recent(iid)
+                            st.session_state.page = "viewer"
+                            st.rerun()
+                    with hb2:
+                        if st.button("Delete",
+                                     key=f"hd{iid}",
+                                     use_container_width=True):
+                            with st.spinner("Deleting..."):
+                                req(f"/report/{iid}",
+                                    method="DELETE", no_cache=True)
+                            st.rerun()
+
+        # ── Handle bulk delete ────────────────────────────────
+        if delete_selected:
+            if not selected_ids:
+                st.warning("No studies selected. Tick the boxes first.")
+            else:
+                with st.spinner(f"Deleting {len(selected_ids)} studies..."):
+                    for iid in selected_ids:
+                        req(f"/report/{iid}", method="DELETE", no_cache=True)
+                st.success(f"Deleted {len(selected_ids)} studies")
+                st.rerun()
 
 
 # ══════════════════════════════════════════════════════════
 # SETTINGS
 # ══════════════════════════════════════════════════════════
-with t6:
+if PAGE == "settings":
     sc1, sc2 = st.columns(2, gap="large")
 
     with sc1:
@@ -1264,7 +1278,7 @@ with t6:
             else:
                 st.error(
                     "Cannot connect. Verify the URL is correct "
-                    "and Colab Cell 10 is running."
+                    "and Colab Cell 8 is running."
                 )
 
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
@@ -1295,7 +1309,7 @@ with t6:
         <div style="font-family:'Inter',sans-serif; font-size:13px;
                     color:#6a7385; line-height:2.2;">
             1. Go to Google Colab<br>
-            2. Run Cell 10<br>
+            2. Run Cell 8<br>
             3. Copy the ngrok URL from the output<br>
             4. Paste it in the field above and click Save
         </div>
@@ -1356,7 +1370,7 @@ with t6:
 # ══════════════════════════════════════════════════════════
 # SYSTEM TESTS
 # ══════════════════════════════════════════════════════════
-with t7:
+if PAGE == "tests":
     section("System Functionality Test Suite")
 
     st.markdown("""
