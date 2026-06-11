@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+import os
 import streamlit as st
 import requests
 from PIL import Image, ImageEnhance
@@ -23,7 +24,7 @@ import io
 import numpy as np
 from datetime import datetime
 
-DEFAULT_API_URL = "https://pampered-enrage-girdle.ngrok-free.dev"
+DEFAULT_API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 DISEASE_INFO = {
     "Atelectasis"       : "Partial or complete collapse of a lung or lobe.",
