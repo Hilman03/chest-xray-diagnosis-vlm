@@ -109,6 +109,17 @@ def mongo_list():
         return []
 
 
+def mongo_delete(image_id: str) -> bool:
+    if not _mongo_connected or _mongo_collection is None:
+        return False
+    try:
+        _mongo_collection.delete_one({"image_id": image_id})
+        return True
+    except Exception as e:
+        print(f"  [DB] MongoDB delete error: {e}")
+        return False
+
+
 # ─────────────────────────────────────────────────────────────
 # UNIFIED FUNCTIONS
 # ─────────────────────────────────────────────────────────────
@@ -127,11 +138,39 @@ def get_record(image_id: str):
     return mongo_get(image_id)
 
 
+def delete_record(image_id: str):
+    """Remove a record from both in-memory store and MongoDB."""
+    _store.pop(image_id, None)
+    if _mongo_connected:
+        mongo_delete(image_id)
+
+
 def list_records():
-    memory = store_list()
-    if memory:
-        return memory
-    return mongo_list()
+    """
+    Merge MongoDB (persisted) and in-memory (current session) records,
+    deduplicated by image_id. In-memory wins on conflict since it is the
+    freshest. This fixes the case where a restarted server has an empty
+    in-memory store and would otherwise hide all persisted studies after
+    a single new upload.
+    """
+    merged = {}
+
+    # MongoDB first (persisted from earlier sessions)
+    for r in mongo_list():
+        iid = r.get("image_id")
+        if iid:
+            merged[iid] = r
+
+    # In-memory overrides (freshest data this session)
+    for r in store_list():
+        iid = r.get("image_id")
+        if iid:
+            merged[iid] = r
+
+    records = list(merged.values())
+    # Stable chronological order (oldest → newest) for consistent display
+    records.sort(key=lambda r: r.get("uploaded_at", ""))
+    return records
 
 
 def is_mongo_connected() -> bool:

@@ -49,7 +49,7 @@ from dotenv import load_dotenv
 from PIL import Image
 
 from database import (
-    connect_mongodb, save_record, get_record,
+    connect_mongodb, save_record, get_record, delete_record,
     list_records, store_exists, is_mongo_connected,
 )
 from schemas import (
@@ -790,8 +790,7 @@ async def delete_report(image_id: str):
         if path and Path(path).exists():
             Path(path).unlink()
 
-    from database import _store
-    _store.pop(image_id, None)
+    delete_record(image_id)
 
     return {"message": f"Report {image_id} deleted successfully"}
 
