@@ -363,6 +363,156 @@ db  = h.get("mongodb","—") if h else "—"
 cnt = h.get("total_reports",0) if h else 0
 now = datetime.now().strftime("%d %b %Y  %H:%M")
 
+# ══════════════════════════════════════════════════════════════
+# COVER / LANDING PAGE  (renders alone — brand bar is below it)
+# ══════════════════════════════════════════════════════════════
+if st.session_state.page == "cover":
+    _stat_col = "#5fb98f" if ok else "#d98c8c"
+    _stat_txt = "System Online" if ok else "Backend Offline"
+    _today    = datetime.now().strftime("%A, %d %B %Y")
+
+    st.markdown(f"""
+    <style>
+      .lp-wrap {{ max-width:1080px; margin:24px auto 0; }}
+      .lp-rule {{ height:1px; background:linear-gradient(90deg,
+                  transparent,#2e3442 18%,#2e3442 82%,transparent); }}
+      .lp-kicker {{ font-family:'JetBrains Mono',monospace; font-size:12px;
+                    letter-spacing:3px; color:#5a87c4; text-transform:uppercase;
+                    font-weight:500; }}
+      .lp-h1 {{ font-family:'Inter',sans-serif; font-size:52px; line-height:1.05;
+                font-weight:700; color:#f2f5fb; letter-spacing:-1.2px;
+                margin:18px 0 0; }}
+      .lp-h1 .accent {{ color:#5b9bf0; }}
+      .lp-sub {{ font-family:'Inter',sans-serif; font-size:17px; line-height:1.6;
+                 color:#9aa3b5; max-width:520px; margin-top:18px; font-weight:400; }}
+      .lp-panel {{ background:#1f2530; border:1px solid #2b3240;
+                   border-radius:12px; padding:22px 24px; }}
+      .lp-frame {{ position:relative; background:
+                   radial-gradient(120% 120% at 30% 20%,#202734 0%,#171b23 100%);
+                   border:1px solid #2b3240; border-radius:12px; height:300px;
+                   overflow:hidden; }}
+      .lp-corner {{ position:absolute; width:22px; height:22px;
+                    border-color:#3f6aa5; }}
+      .lp-statline {{ display:flex; justify-content:space-between;
+                      font-family:'JetBrains Mono',monospace; font-size:11px;
+                      color:#5b6b82; padding:7px 0; border-bottom:1px solid #232a36; }}
+      .lp-statline b {{ color:#aab4c6; font-weight:500; }}
+    </style>
+
+    <div class="lp-wrap">
+      <div style="display:flex; align-items:center; justify-content:space-between;
+                  padding-bottom:18px;">
+        <div style="display:flex; align-items:center; gap:11px;">
+          <div style="width:30px; height:30px; border-radius:7px;
+                      background:linear-gradient(135deg,#4d8ef0,#3a6fc0);
+                      display:flex; align-items:center; justify-content:center;
+                      font-family:'Inter'; font-weight:700; color:#fff;
+                      font-size:15px;">C</div>
+          <span style="font-family:'Inter'; font-weight:600; font-size:15px;
+                       color:#dfe4ee; letter-spacing:0.2px;">CXR AI-PACS</span>
+        </div>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px;
+                     color:#566074;">{_today}</span>
+      </div>
+      <div class="lp-rule"></div>
+
+      <div style="display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px;
+                  align-items:center; padding:54px 0 40px;">
+        <div>
+          <div class="lp-kicker">Chest Radiograph Analysis Workstation</div>
+          <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
+          <div class="lp-sub">
+            A PACS-style workstation that pairs PubMedCLIP vision analysis
+            with TinyLlama report generation — upload, review, and export
+            structured radiograph observations in one place.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:22px;">
+            <span style="width:8px; height:8px; border-radius:50%;
+                         background:{_stat_col};"></span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
+                         color:{_stat_col};">{_stat_txt}</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
+                         color:#48515f;">·&nbsp; {cnt} studies in archive</span>
+          </div>
+        </div>
+
+        <div class="lp-frame">
+          <div class="lp-corner" style="top:12px; left:12px;
+               border-top:2px solid #3f6aa5; border-left:2px solid #3f6aa5;"></div>
+          <div class="lp-corner" style="top:12px; right:12px;
+               border-top:2px solid #3f6aa5; border-right:2px solid #3f6aa5;"></div>
+          <div class="lp-corner" style="bottom:12px; left:12px;
+               border-bottom:2px solid #3f6aa5; border-left:2px solid #3f6aa5;"></div>
+          <div class="lp-corner" style="bottom:12px; right:12px;
+               border-bottom:2px solid #3f6aa5; border-right:2px solid #3f6aa5;"></div>
+          <div style="position:absolute; top:16px; left:18px;
+                      font-family:'JetBrains Mono',monospace; font-size:10px;
+                      color:#3f6aa5; line-height:1.7;">
+            PA · UPRIGHT<br>224 × 224<br>AI-ASSIST</div>
+          <div style="position:absolute; inset:0; display:flex; align-items:center;
+                      justify-content:center; flex-direction:column; gap:14px;">
+            <div style="width:96px; height:96px; border-radius:50%;
+                        border:1px solid #2f3a4c; display:flex; align-items:center;
+                        justify-content:center;">
+              <div style="width:62px; height:62px; border-radius:50%;
+                          background:radial-gradient(circle,#2a3550,#1c2330);
+                          border:1px solid #34507a;
+                          box-shadow:0 0 30px rgba(77,142,240,0.25);"></div>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10px;
+                        color:#46546b; letter-spacing:1px;">THORAX · FRONTAL</div>
+          </div>
+          <div style="position:absolute; bottom:16px; right:18px;
+                      font-family:'JetBrains Mono',monospace; font-size:10px;
+                      color:#3f6aa5; text-align:right; line-height:1.7;">
+            PubMedCLIP<br>TinyLlama 1.1B</div>
+        </div>
+      </div>
+      <div class="lp-rule"></div>
+
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:18px;
+                  padding:28px 0 8px;">
+        <div class="lp-panel">
+          <div style="font-family:'Inter'; font-weight:600; font-size:14px;
+                      color:#e3e8f0;">DICOM Viewer</div>
+          <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
+                      margin-top:6px; line-height:1.6;">
+            Window/level, brightness and contrast controls with live adjustment.</div>
+        </div>
+        <div class="lp-panel">
+          <div style="font-family:'Inter'; font-weight:600; font-size:14px;
+                      color:#e3e8f0;">AI Triage</div>
+          <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
+                      margin-top:6px; line-height:1.6;">
+            15-class disease scoring with priority flags from STAT to routine.</div>
+        </div>
+        <div class="lp-panel">
+          <div style="font-family:'Inter'; font-weight:600; font-size:14px;
+                      color:#e3e8f0;">Structured Reports</div>
+          <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
+                      margin-top:6px; line-height:1.6;">
+            Generated observations, exportable as a formatted PDF report.</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _lc1, _lc2, _lc3 = st.columns([1.15, 0.85, 1])
+    with _lc1:
+        if st.button("Enter Workstation  →", use_container_width=True,
+                     type="primary", key="enter_btn"):
+            st.session_state.page = "worklist"
+            st.rerun()
+
+    st.markdown("""
+    <div style="max-width:1080px; margin:18px auto 0; text-align:left;
+                font-family:'Inter',sans-serif; font-size:11px; color:#414a58;">
+        For demonstration and educational purposes only — not a certified
+        medical device and not intended for clinical diagnosis.
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
 # ── Top navigation bar ────────────────────────────────────────
 conn_bg  = "#162316" if ok else "#231616"
 conn_bdr = "#265626" if ok else "#562626"
@@ -425,55 +575,12 @@ if not ok:
         "and click Save. Make sure Colab Cell 8 is running."
     )
 
-# ── Cover / landing page ──────────────────────────────────────
+# ── Page registry ─────────────────────────────────────────────
 PAGES = ["worklist", "viewer", "upload", "history", "settings", "tests"]
 PAGE_LABELS = {
     "worklist": "Worklist", "viewer": "Viewer", "upload": "Upload",
     "history": "History", "settings": "Settings", "tests": "System Tests",
 }
-
-if st.session_state.page == "cover":
-    st.markdown(f"""
-    <div style="margin-top:30px; padding:48px 40px; text-align:center;
-                background:linear-gradient(160deg,#1e2430 0%,#232830 100%);
-                border:1px solid #2e3442; border-radius:14px;">
-        <div style="font-family:'Inter',sans-serif; font-size:40px;
-                    font-weight:700; color:#ffffff; letter-spacing:-0.5px;">
-            CXR AI-PACS
-        </div>
-        <div style="font-family:'Inter',sans-serif; font-size:16px;
-                    color:#8a93a6; margin-top:10px;">
-            AI-Assisted Chest X-Ray Analysis & Reporting Workstation
-        </div>
-        <div style="width:60px; height:3px; background:#4d8ef0;
-                    margin:24px auto; border-radius:2px;"></div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:12px;
-                    color:#5a6478; line-height:2;">
-            PubMedCLIP &nbsp;·&nbsp; TinyLlama 1.1B &nbsp;·&nbsp; NIH ChestX-ray14<br>
-            DICOM Viewer &nbsp;·&nbsp; Structured Reporting &nbsp;·&nbsp; PDF Export
-        </div>
-        <div style="font-family:'Inter',sans-serif; font-size:13px;
-                    color:{'#72c472' if ok else '#e07878'}; margin-top:20px;">
-            Backend: {'Connected' if ok else 'Offline — configure in Settings after entering'}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    _cc1, _cc2, _cc3 = st.columns([1, 1, 1])
-    with _cc2:
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        if st.button("Enter Workstation", use_container_width=True,
-                     type="primary", key="enter_btn"):
-            st.session_state.page = "worklist"
-            st.rerun()
-
-    st.markdown("""
-    <div style="margin-top:28px; text-align:center; font-family:'Inter',sans-serif;
-                font-size:11px; color:#3a4250;">
-        For demonstration and educational purposes only — not for clinical use.
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
 
 # ── Page navigation bar ───────────────────────────────────────
 _nav = st.columns(len(PAGES))
@@ -1268,7 +1375,8 @@ if PAGE == "settings":
             st.session_state.api = nu.rstrip("/")
             fetch_reports.clear()
             fetch_health.clear()
-            hh = fetch_health(st.session_state.api)
+            with st.spinner("Testing connection..."):
+                hh = fetch_health(st.session_state.api)
             if hh:
                 st.success(
                     f"Connected   "
