@@ -69,6 +69,14 @@ def run_pipeline(image_path: str) -> dict:
         vlm_result  = infer_vlm_with_label(str(image_path))
         vlm_elapsed = round(time.time() - vlm_start, 3)
 
+        # A failed VLM returns success=False with an "Unknown" label — treat
+        # it as an error instead of generating a bogus report downstream.
+        if not vlm_result.get("success", False):
+            raise RuntimeError(
+                "PubMedCLIP inference failed — model unavailable or "
+                "prediction error. Check that the model loaded correctly."
+            )
+
         result["vlm_caption"]   = vlm_result["caption"]
         result["disease_label"] = vlm_result["disease_label"]
         result["top_diseases"]  = vlm_result["top_diseases"]

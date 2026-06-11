@@ -483,12 +483,16 @@ async def get_report(image_id: str):
     if not record:
         raise HTTPException(status_code=404, detail="Report not found.")
 
-    return ReportResponse(**{
-        k: record.get(k, "" if isinstance(
-            ReportResponse.model_fields[k].default, str) else
-            ReportResponse.model_fields[k].default)
-        for k in ReportResponse.model_fields
-    })
+    # Build response defensively: use stored values when present and non-null,
+    # fall back to "" for any missing required field, and let Pydantic apply
+    # the declared default for optional fields that are absent.
+    data = {}
+    for name, field in ReportResponse.model_fields.items():
+        if name in record and record[name] is not None:
+            data[name] = record[name]
+        elif field.is_required():
+            data[name] = ""
+    return ReportResponse(**data)
 
 
 # ═════════════════════════════════════════════════════════════
