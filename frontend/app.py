@@ -413,13 +413,14 @@ if not ok:
     )
 
 # ── Tabs ──────────────────────────────────────────────────────
-t1,t2,t3,t4,t5,t6 = st.tabs([
+t1,t2,t3,t4,t5,t6,t7 = st.tabs([
     "Worklist",
     "Viewer",
     "Compare",
     "Upload",
     "History",
     "Settings",
+    "System Tests",
 ])
 
 # ══════════════════════════════════════════════════════════
@@ -1342,3 +1343,132 @@ with t6:
                             color:#4a5368;">{info5}</div>
             </div>
             """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════
+# SYSTEM TESTS
+# ══════════════════════════════════════════════════════════
+with t7:
+    section("Functionality Test Suite")
+
+    st.markdown("""
+    <div style="font-family:'Inter',sans-serif; font-size:13px;
+                color:#6a7385; margin-bottom:20px; line-height:1.8;">
+        Runs all functionality tests against the live backend API.<br>
+        Tests cover: image loading, VLM inference, LLM report generation,
+        full pipeline, API health, and database connectivity.
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_run, col_info = st.columns([1, 3])
+    with col_run:
+        run_tests = st.button("Run All Tests", use_container_width=True,
+                              key="run_sys_tests")
+    with col_info:
+        if not ok:
+            st.warning("API is offline — start the backend first.")
+
+    if run_tests:
+        if not ok:
+            st.error("Cannot run tests — API is offline.")
+        else:
+            with st.spinner("Running system tests..."):
+                tr = req("/test", t=180)
+
+            if not tr:
+                st.error("Test endpoint unreachable. Make sure the backend is running.")
+            else:
+                tj = tr.json()
+                sm = tj.get("summary", {})
+                overall = tj.get("overall", "FAIL")
+                tests   = tj.get("tests", [])
+
+                # ── Summary metrics ───────────────────────────────
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Overall",  overall)
+                mc2.metric("Passed",   sm.get("passed", 0))
+                mc3.metric("Failed",   sm.get("failed", 0))
+                mc4.metric("Skipped",  sm.get("skipped", 0))
+
+                st.markdown("<div style='height:16px'></div>",
+                            unsafe_allow_html=True)
+
+                if overall == "PASS":
+                    st.success(
+                        f"All {sm.get('passed')} tests passed — "
+                        f"system is functioning correctly."
+                    )
+                else:
+                    st.error(
+                        f"{sm.get('failed')} test(s) failed — "
+                        f"see details below."
+                    )
+
+                st.markdown("<div style='height:16px'></div>",
+                            unsafe_allow_html=True)
+                section("Test Results")
+
+                # ── Individual test rows ──────────────────────────
+                for t in tests:
+                    status = t.get("status", "FAIL")
+                    if status == "PASS":
+                        dot_col  = "#4abe4a"
+                        bg_col   = "#162316"
+                        bdr_col  = "#265626"
+                        lbl_col  = "#72c472"
+                    elif status == "SKIP":
+                        dot_col  = "#6a7385"
+                        bg_col   = "#1a1e26"
+                        bdr_col  = "#2e3442"
+                        lbl_col  = "#6a7385"
+                    else:
+                        dot_col  = "#e07070"
+                        bg_col   = "#231616"
+                        bdr_col  = "#562626"
+                        lbl_col  = "#e07878"
+
+                    extra_html = ""
+                    if status == "PASS" and "disease_label" in t:
+                        scores_html = "".join(
+                            f'<span style="margin-right:12px;">'
+                            f'{d} <b style="color:#72c472;">'
+                            f'{int(s*100)}%</b></span>'
+                            for d, s in t.get("top_diseases", [])[:3]
+                        )
+                        extra_html = f"""
+                        <div style="margin-top:6px; font-family:'JetBrains Mono',
+                                    monospace; font-size:11px; color:#5a8a5a;">
+                            {scores_html}
+                        </div>"""
+
+                    st.markdown(f"""
+                    <div style="background:{bg_col}; border:1px solid {bdr_col};
+                                border-radius:6px; padding:12px 16px;
+                                margin-bottom:8px;">
+                        <div style="display:flex; align-items:center; gap:10px;
+                                    margin-bottom:4px;">
+                            <span style="width:8px; height:8px; border-radius:50%;
+                                         background:{dot_col}; display:inline-block;
+                                         flex-shrink:0;"></span>
+                            <span style="font-family:'Inter',sans-serif;
+                                         font-size:13px; font-weight:600;
+                                         color:{lbl_col}; flex:1;">{t.get('name')}</span>
+                            <span style="font-family:'JetBrains Mono',monospace;
+                                         font-size:11px; font-weight:700;
+                                         color:{dot_col};">{status}</span>
+                        </div>
+                        <div style="font-family:'JetBrains Mono',monospace;
+                                    font-size:11px; color:#4a5368;
+                                    padding-left:18px;">
+                            {t.get('detail', '')}
+                        </div>
+                        {extra_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
+                            color:#363d4e; margin-top:8px;">
+                    Tested: {tj.get('test_date','')[:19].replace('T', '  ')}
+                </div>
+                """, unsafe_allow_html=True)

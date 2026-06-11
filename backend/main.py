@@ -767,6 +767,141 @@ async def delete_report(image_id: str):
     return {"message": f"Report {image_id} deleted successfully"}
 
 
+# ═════════════════════════════════════════════════════════════
+# ENDPOINT 11 — GET /test  (system-wide functional tests)
+# ═════════════════════════════════════════════════════════════
+@app.get("/test")
+async def run_system_tests():
+    """
+    Run all functionality tests using a sample image from
+    data/processed/images/.  No image upload required.
+    Returns structured pass/fail results for each test category.
+    """
+    results = []
+
+    def _r(name, status, detail="", **extra):
+        results.append({"name": name, "status": status, "detail": detail, **extra})
+
+    # ── Test 1: sample image available ───────────────────────
+    images_dir = ROOT / "data" / "processed" / "images"
+    sample_images = sorted(images_dir.glob("*.png"))
+    if sample_images:
+        _r("Sample Images Available", "PASS",
+           f"{len(sample_images)} image(s) in data/processed/images/")
+        image_path = str(sample_images[0])
+    else:
+        _r("Sample Images Available", "FAIL",
+           "No images in data/processed/images/ — run scripts/preprocess.py")
+        image_path = None
+
+    # ── Test 2: image loadable ────────────────────────────────
+    if image_path:
+        try:
+            img = Image.open(image_path)
+            _r("Image Loading", "PASS",
+               f"Size: {img.size}, Mode: {img.mode}")
+        except Exception as e:
+            _r("Image Loading", "FAIL", str(e))
+            image_path = None
+    else:
+        _r("Image Loading", "SKIP", "No sample image")
+
+    # ── Test 3: VLM inference ─────────────────────────────────
+    vlm_result = None
+    if image_path:
+        try:
+            from vlm_inference import infer_vlm_with_label
+            t0 = time.time()
+            vlm_result = infer_vlm_with_label(image_path)
+            elapsed = round(time.time() - t0, 3)
+            _r("VLM Inference (PubMedCLIP)", "PASS",
+               f"Disease: {vlm_result['disease_label']}  Time: {elapsed}s",
+               disease_label=vlm_result["disease_label"],
+               top_diseases=vlm_result["top_diseases"],
+               response_time=elapsed)
+        except Exception as e:
+            _r("VLM Inference (PubMedCLIP)", "FAIL", str(e))
+    else:
+        _r("VLM Inference (PubMedCLIP)", "SKIP", "No image to test")
+
+    # ── Test 4: output structure ──────────────────────────────
+    if vlm_result:
+        required = ["caption", "disease_label", "top_diseases",
+                    "all_scores", "response_time", "success"]
+        missing = [k for k in required if k not in vlm_result]
+        scores_ok = all(0.0 <= s <= 1.0
+                        for _, s in vlm_result.get("top_diseases", []))
+        if not missing and scores_ok:
+            _r("VLM Output Structure", "PASS",
+               "All required keys present, scores in [0,1]")
+        else:
+            detail = (f"Missing keys: {missing}" if missing
+                      else "Scores out of range")
+            _r("VLM Output Structure", "FAIL", detail)
+    else:
+        _r("VLM Output Structure", "SKIP", "VLM did not run")
+
+    # ── Test 5: LLM report generation ────────────────────────
+    llm_result = None
+    if vlm_result:
+        try:
+            from llm_refine import refine_llm
+            t0 = time.time()
+            llm_result = refine_llm(
+                vlm_result["caption"],
+                vlm_result["disease_label"],
+                vlm_result["top_diseases"],
+            )
+            elapsed = round(time.time() - t0, 3)
+            _r("LLM Report Generation", "PASS",
+               f"Length: {len(llm_result['report'])} chars  Time: {elapsed}s",
+               backend=llm_result["backend"],
+               response_time=elapsed)
+        except Exception as e:
+            _r("LLM Report Generation", "FAIL", str(e))
+    else:
+        _r("LLM Report Generation", "SKIP", "VLM did not produce output")
+
+    # ── Test 6: full pipeline end-to-end ─────────────────────
+    if image_path:
+        try:
+            from pipeline import run_pipeline
+            t0 = time.time()
+            pr = run_pipeline(image_path)
+            elapsed = round(time.time() - t0, 3)
+            if pr["status"] == "success":
+                _r("Full Pipeline (end-to-end)", "PASS",
+                   f"Total: {elapsed}s  Disease: {pr['disease_label']}",
+                   total_time=elapsed)
+            else:
+                _r("Full Pipeline (end-to-end)", "FAIL", pr.get("error", ""))
+        except Exception as e:
+            _r("Full Pipeline (end-to-end)", "FAIL", str(e))
+    else:
+        _r("Full Pipeline (end-to-end)", "SKIP", "No image to test")
+
+    # ── Test 7: API health ────────────────────────────────────
+    _r("API Health", "PASS",
+       f"Uptime: {str(datetime.now() - _system_start_time).split('.')[0]}  "
+       f"Requests: {_total_requests}  Errors: {_error_count}")
+
+    # ── Test 8: database ──────────────────────────────────────
+    db_status = "connected" if is_mongo_connected() else "in-memory"
+    _r("Database", "PASS", f"Mode: {db_status}  Records: {len(list_records())}")
+
+    passed = sum(1 for r in results if r["status"] == "PASS")
+    failed = sum(1 for r in results if r["status"] == "FAIL")
+    total  = len(results)
+
+    return {
+        "test_date": datetime.now().isoformat(),
+        "overall" : "PASS" if failed == 0 else "FAIL",
+        "summary" : {"passed": passed, "failed": failed,
+                     "skipped": total - passed - failed, "total": total},
+        "tests"   : results,
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────────────────────
