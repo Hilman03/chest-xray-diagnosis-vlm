@@ -114,6 +114,85 @@ def run_pytest(test_file: str, quick: bool = False) -> dict:
         }
 
 
+def benchmark_timing(max_images: int = 5) -> dict:
+    """
+    Run the REAL pipeline (PubMedCLIP + TinyLlama) on a handful of
+    processed images and record measured processing times.
+
+    Unlike the pytest suites — which only assert that times stay under a
+    threshold (PASS/FAIL) — this captures the actual seconds so the report's
+    Response Time table (Section 4.4.1) is reproducible from the test runner.
+    """
+    print("  [PERF] Response-time benchmark (real models)")
+    print("         Running PubMedCLIP + TinyLlama on sample images...")
+    print()
+
+    images = sorted((ROOT / "data" / "processed" / "images").glob("*.png"))[:max_images]
+    if not images:
+        print("         SKIPPED — no processed images in data/processed/images")
+        print()
+        return {"status": "skipped",
+                "reason": "no processed images",
+                "per_image": [], "summary": {}}
+
+    try:
+        from pipeline import run_pipeline
+    except Exception as e:
+        print(f"         SKIPPED — could not import pipeline: {e}")
+        print()
+        return {"status": "skipped", "reason": f"import error: {e}",
+                "per_image": [], "summary": {}}
+
+    per_image = []
+    for img in images:
+        try:
+            r = run_pipeline(str(img))
+            per_image.append({
+                "image_name"   : r.get("image_name", img.name),
+                "disease_label": r.get("disease_label", ""),
+                "vlm_time"     : r.get("vlm_time", 0.0),
+                "llm_time"     : r.get("llm_time", 0.0),
+                "total_time"   : r.get("total_time", 0.0),
+                "status"       : r.get("status", "error"),
+            })
+            print(f"         {img.name:<22} "
+                  f"VLM {r.get('vlm_time',0):.2f}s  "
+                  f"LLM {r.get('llm_time',0):.2f}s  "
+                  f"Total {r.get('total_time',0):.2f}s  "
+                  f"[{r.get('status')}]")
+        except Exception as e:
+            per_image.append({"image_name": img.name, "status": "error",
+                              "error": str(e), "vlm_time": 0.0,
+                              "llm_time": 0.0, "total_time": 0.0})
+            print(f"         {img.name:<22} ERROR: {e}")
+
+    ok = [p for p in per_image if p["status"] == "success"]
+
+    def _stats(key):
+        vals = [p[key] for p in ok]
+        if not vals:
+            return {"avg": 0.0, "min": 0.0, "max": 0.0}
+        return {"avg": round(sum(vals) / len(vals), 3),
+                "min": round(min(vals), 3),
+                "max": round(max(vals), 3)}
+
+    summary = {
+        "images_tested": len(per_image),
+        "success_count": len(ok),
+        "vlm_time"  : _stats("vlm_time"),
+        "llm_time"  : _stats("llm_time"),
+        "total_time": _stats("total_time"),
+    }
+
+    print()
+    if ok:
+        print(f"         Avg VLM {summary['vlm_time']['avg']}s  "
+              f"Avg LLM {summary['llm_time']['avg']}s  "
+              f"Avg Total {summary['total_time']['avg']}s")
+    print()
+    return {"status": "ok", "per_image": per_image, "summary": summary}
+
+
 def print_banner():
     print()
     print("=" * 65)
@@ -156,6 +235,15 @@ def run_all(quick: bool = False) -> dict:
 
         results.append({**test, **res})
 
+    # ── Response-time benchmark (real models, unless --quick) ────
+    if quick:
+        print("  [PERF] Response-time benchmark SKIPPED (--quick)")
+        print()
+        perf = {"status": "skipped", "reason": "--quick",
+                "per_image": [], "summary": {}}
+    else:
+        perf = benchmark_timing()
+
     total_time  = round(time.time() - t_start, 2)
     overall_ok  = total_f == 0 and total_e == 0
 
@@ -187,6 +275,24 @@ def run_all(quick: bool = False) -> dict:
             print(f"  {criterion:<28} [{status}]  {description}")
     print()
 
+    # ── Response-time results (Section 4.4.1) ────────────────────
+    if perf.get("status") == "ok" and perf.get("summary"):
+        ps = perf["summary"]
+        print("  RESPONSE TIME (real models, Section 4.4.1)")
+        print("  " + "-" * 60)
+        print(f"  Images tested : {ps['images_tested']}  "
+              f"(success {ps['success_count']})")
+        print(f"  {'Stage':<14}{'Avg (s)':>10}{'Min (s)':>10}{'Max (s)':>10}")
+        for stage, key in [("VLM", "vlm_time"),
+                           ("LLM", "llm_time"),
+                           ("Total", "total_time")]:
+            s = ps[key]
+            print(f"  {stage:<14}{s['avg']:>10}{s['min']:>10}{s['max']:>10}")
+        print()
+    elif perf.get("status") == "skipped":
+        print(f"  RESPONSE TIME : skipped ({perf.get('reason','')})")
+        print()
+
     # ── Save results ─────────────────────────────────────────────
     summary = {
         "project"        : "CXR Diagnosis System — VLM + LLM Pipeline",
@@ -199,6 +305,7 @@ def run_all(quick: bool = False) -> dict:
         "total_errors"   : total_e,
         "total_skipped"  : total_s,
         "total_time_s"   : total_time,
+        "performance"    : perf,
         "test_suites"    : results,
         "evaluation_criteria": {
             "technical_functionality": next(
@@ -229,6 +336,21 @@ def run_all(quick: bool = False) -> dict:
         f.write(f"Failed         : {total_f}\n")
         f.write(f"Errors         : {total_e}\n")
         f.write(f"Duration       : {total_time}s\n\n")
+
+        if perf.get("status") == "ok" and perf.get("summary"):
+            ps = perf["summary"]
+            f.write("RESPONSE TIME — real models (Section 4.4.1)\n")
+            f.write("-" * 65 + "\n")
+            f.write(f"Images tested : {ps['images_tested']} "
+                    f"(success {ps['success_count']})\n")
+            f.write(f"{'Stage':<14}{'Avg (s)':>10}{'Min (s)':>10}{'Max (s)':>10}\n")
+            for stage, key in [("VLM", "vlm_time"),
+                               ("LLM", "llm_time"),
+                               ("Total", "total_time")]:
+                s = ps[key]
+                f.write(f"{stage:<14}{s['avg']:>10}{s['min']:>10}{s['max']:>10}\n")
+            f.write("\n")
+
         f.write("EVALUATION CRITERIA (Section 3.8)\n")
         f.write("-" * 65 + "\n")
         for criterion, description, test_id in criteria:

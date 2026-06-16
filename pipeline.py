@@ -92,6 +92,7 @@ def run_pipeline(image_path: str) -> dict:
             vlm_result["caption"],
             vlm_result["disease_label"],
             vlm_result["top_diseases"],
+            image_path=str(image_path),
         )
 
         result["llm_report"]  = llm_result["report"]

@@ -17,6 +17,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import os
+import json
 import streamlit as st
 import requests
 from PIL import Image, ImageEnhance
@@ -233,6 +234,26 @@ details > summary:hover { border-color: #4d8ef0 !important; color: #fff !importa
 ::-webkit-scrollbar-thumb:hover { background: #464d5e; }
 
 [data-testid="column"] { padding: 0 6px !important; }
+
+/* ── CXR animated loading / buffering visual ─────────────── */
+@keyframes cxrSpin { to { transform: rotate(360deg); } }
+@keyframes cxrBar  { 0% { left:-40%; } 100% { left:100%; } }
+@keyframes cxrPing { 0%,100% { opacity:0.45; } 50% { opacity:1; } }
+.cxr-load-wrap { display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; padding:30px 0 24px;
+    animation:cxrPing 2s ease-in-out infinite; }
+.cxr-spin { width:46px; height:46px; border-radius:50%;
+    border:4px solid #283a55; border-top-color:#4d8ef0;
+    animation:cxrSpin 0.8s linear infinite; }
+.cxr-track { position:relative; width:220px; height:4px; background:#222a36;
+    border-radius:3px; overflow:hidden; }
+.cxr-track::after { content:""; position:absolute; top:0; width:40%;
+    height:100%; border-radius:3px;
+    background:linear-gradient(90deg,transparent,#4d8ef0,#74aaff,transparent);
+    animation:cxrBar 1.1s ease-in-out infinite; }
+.cxr-txt { font-family:'JetBrains Mono',monospace; font-size:12px;
+    letter-spacing:1.5px; color:#74aaff; text-transform:uppercase;
+    text-align:center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -270,15 +291,24 @@ def fetch_reports(api_url):
         return {"total":0,"reports":[]}
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _fetch_image_bytes_cached(api_url, image_id):
+    """Download raw image bytes — only successful results reach this cache.
+    Raises on failure so st.cache_data does NOT store a None (which would
+    otherwise make a study's image stay blank for the whole TTL)."""
+    r = requests.get(
+        api_url.rstrip("/") + f"/images/{image_id}",
+        headers=HDR, timeout=30
+    )
+    if not r.ok or not r.content:
+        raise RuntimeError(f"image fetch failed: HTTP {r.status_code}")
+    return r.content
+
 def fetch_image_bytes(api_url, image_id):
-    """Download raw image bytes once and cache — keeps slider edits instant."""
+    """Cached fetch with safe fallback — failures are never cached, so a
+    previously-uploaded study shows its image as soon as it is reachable."""
     try:
-        r = requests.get(
-            api_url.rstrip("/") + f"/images/{image_id}",
-            headers=HDR, timeout=30
-        )
-        return r.content if r.ok else None
-    except:
+        return _fetch_image_bytes_cached(api_url, image_id)
+    except Exception:
         return None
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -334,6 +364,24 @@ def add_recent(image_id):
         ids.insert(0, image_id)
     st.session_state.last_ids = ids[:5]
 
+from contextlib import contextmanager
+
+@contextmanager
+def cxr_spinner(text="Loading…"):
+    """Animated buffering visual used in place of st.spinner everywhere."""
+    holder = st.empty()
+    holder.markdown(f"""
+    <div class="cxr-load-wrap">
+        <div class="cxr-spin"></div>
+        <div class="cxr-track"></div>
+        <div class="cxr-txt">{text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    try:
+        yield
+    finally:
+        holder.empty()
+
 def section(label):
     st.markdown(f"""
     <div style="font-family:'Inter',sans-serif; font-size:11px;
@@ -373,30 +421,54 @@ if st.session_state.page == "cover":
 
     st.markdown(f"""
     <style>
-      .lp-wrap {{ max-width:1080px; margin:24px auto 0; }}
+      @keyframes lpFade {{ from {{ opacity:0; transform:translateY(14px); }}
+                          to {{ opacity:1; transform:translateY(0); }} }}
+      @keyframes lpPulse {{ 0%,100% {{ box-shadow:0 0 22px rgba(77,142,240,0.18); }}
+                            50% {{ box-shadow:0 0 46px rgba(77,142,240,0.42); }} }}
+      @keyframes lpSweep {{ 0% {{ transform:translateY(-110%); }}
+                            100% {{ transform:translateY(210%); }} }}
+      .lp-wrap {{ max-width:1080px; margin:18px auto 0;
+                  animation:lpFade 0.6s ease both; }}
       .lp-rule {{ height:1px; background:linear-gradient(90deg,
                   transparent,#2e3442 18%,#2e3442 82%,transparent); }}
       .lp-kicker {{ font-family:'JetBrains Mono',monospace; font-size:12px;
-                    letter-spacing:3px; color:#5a87c4; text-transform:uppercase;
-                    font-weight:500; }}
+                    letter-spacing:3px; color:#74aaff; text-transform:uppercase;
+                    font-weight:500; display:inline-block;
+                    background:rgba(77,142,240,0.08); border:1px solid #283a55;
+                    padding:6px 12px; border-radius:20px; }}
       .lp-h1 {{ font-family:'Inter',sans-serif; font-size:52px; line-height:1.05;
                 font-weight:700; color:#f2f5fb; letter-spacing:-1.2px;
-                margin:18px 0 0; }}
-      .lp-h1 .accent {{ color:#5b9bf0; }}
+                margin:20px 0 0; }}
+      .lp-h1 .accent {{ background:linear-gradient(90deg,#5b9bf0,#74aaff);
+                        -webkit-background-clip:text; background-clip:text;
+                        -webkit-text-fill-color:transparent; }}
       .lp-sub {{ font-family:'Inter',sans-serif; font-size:17px; line-height:1.6;
                  color:#9aa3b5; max-width:520px; margin-top:18px; font-weight:400; }}
-      .lp-panel {{ background:#1f2530; border:1px solid #2b3240;
-                   border-radius:12px; padding:22px 24px; }}
+      .lp-panel {{ background:linear-gradient(160deg,#1f2530,#1a1f29);
+                   border:1px solid #2b3240; border-radius:12px; padding:22px 24px;
+                   transition:transform 0.18s ease, border-color 0.18s ease,
+                              box-shadow 0.18s ease; }}
+      .lp-panel:hover {{ transform:translateY(-3px); border-color:#3f6aa5;
+                         box-shadow:0 10px 28px rgba(0,0,0,0.35); }}
+      .lp-ico {{ width:34px; height:34px; border-radius:9px; display:flex;
+                 align-items:center; justify-content:center; margin-bottom:12px;
+                 background:rgba(77,142,240,0.12); border:1px solid #2f4a6e;
+                 color:#74aaff; font-family:'JetBrains Mono'; font-weight:600;
+                 font-size:15px; }}
       .lp-frame {{ position:relative; background:
                    radial-gradient(120% 120% at 30% 20%,#202734 0%,#171b23 100%);
-                   border:1px solid #2b3240; border-radius:12px; height:300px;
+                   border:1px solid #2b3240; border-radius:14px; height:300px;
                    overflow:hidden; }}
+      .lp-frame::after {{ content:""; position:absolute; left:0; right:0; height:60px;
+                   background:linear-gradient(180deg,transparent,
+                   rgba(91,155,240,0.10),transparent);
+                   animation:lpSweep 3.6s linear infinite; pointer-events:none; }}
       .lp-corner {{ position:absolute; width:22px; height:22px;
                     border-color:#3f6aa5; }}
-      .lp-statline {{ display:flex; justify-content:space-between;
-                      font-family:'JetBrains Mono',monospace; font-size:11px;
-                      color:#5b6b82; padding:7px 0; border-bottom:1px solid #232a36; }}
-      .lp-statline b {{ color:#aab4c6; font-weight:500; }}
+      .lp-pulse {{ width:62px; height:62px; border-radius:50%;
+                   background:radial-gradient(circle,#2a3550,#1c2330);
+                   border:1px solid #34507a;
+                   animation:lpPulse 2.6s ease-in-out infinite; }}
     </style>
 
     <div class="lp-wrap">
@@ -407,7 +479,8 @@ if st.session_state.page == "cover":
                       background:linear-gradient(135deg,#4d8ef0,#3a6fc0);
                       display:flex; align-items:center; justify-content:center;
                       font-family:'Inter'; font-weight:700; color:#fff;
-                      font-size:15px;">C</div>
+                      font-size:15px;
+                      box-shadow:0 4px 12px rgba(77,142,240,0.35);">C</div>
           <span style="font-family:'Inter'; font-weight:600; font-size:15px;
                        color:#dfe4ee; letter-spacing:0.2px;">CXR AI-PACS</span>
         </div>
@@ -423,12 +496,15 @@ if st.session_state.page == "cover":
           <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
           <div class="lp-sub">
             A PACS-style workstation that pairs PubMedCLIP vision analysis
-            with TinyLlama report generation — upload, review, and export
+            with Ollama report generation — upload, review, and export
             structured radiograph observations in one place.
           </div>
-          <div style="display:flex; align-items:center; gap:8px; margin-top:22px;">
+          <div style="display:inline-flex; align-items:center; gap:8px;
+                      margin-top:22px; background:#1c2230; border:1px solid #2b3240;
+                      padding:7px 14px; border-radius:20px;">
             <span style="width:8px; height:8px; border-radius:50%;
-                         background:{_stat_col};"></span>
+                         background:{_stat_col};
+                         box-shadow:0 0 8px {_stat_col};"></span>
             <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
                          color:{_stat_col};">{_stat_txt}</span>
             <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
@@ -454,10 +530,7 @@ if st.session_state.page == "cover":
             <div style="width:96px; height:96px; border-radius:50%;
                         border:1px solid #2f3a4c; display:flex; align-items:center;
                         justify-content:center;">
-              <div style="width:62px; height:62px; border-radius:50%;
-                          background:radial-gradient(circle,#2a3550,#1c2330);
-                          border:1px solid #34507a;
-                          box-shadow:0 0 30px rgba(77,142,240,0.25);"></div>
+              <div class="lp-pulse"></div>
             </div>
             <div style="font-family:'JetBrains Mono',monospace; font-size:10px;
                         color:#46546b; letter-spacing:1px;">THORAX · FRONTAL</div>
@@ -465,7 +538,7 @@ if st.session_state.page == "cover":
           <div style="position:absolute; bottom:16px; right:18px;
                       font-family:'JetBrains Mono',monospace; font-size:10px;
                       color:#3f6aa5; text-align:right; line-height:1.7;">
-            PubMedCLIP<br>TinyLlama 1.1B</div>
+            PubMedCLIP<br>Ollama</div>
         </div>
       </div>
       <div class="lp-rule"></div>
@@ -473,6 +546,7 @@ if st.session_state.page == "cover":
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:18px;
                   padding:28px 0 8px;">
         <div class="lp-panel">
+          <div class="lp-ico">▣</div>
           <div style="font-family:'Inter'; font-weight:600; font-size:14px;
                       color:#e3e8f0;">DICOM Viewer</div>
           <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
@@ -480,6 +554,7 @@ if st.session_state.page == "cover":
             Window/level, brightness and contrast controls with live adjustment.</div>
         </div>
         <div class="lp-panel">
+          <div class="lp-ico">◈</div>
           <div style="font-family:'Inter'; font-weight:600; font-size:14px;
                       color:#e3e8f0;">AI Triage</div>
           <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
@@ -487,6 +562,7 @@ if st.session_state.page == "cover":
             15-class disease scoring with priority flags from STAT to routine.</div>
         </div>
         <div class="lp-panel">
+          <div class="lp-ico">≣</div>
           <div style="font-family:'Inter'; font-weight:600; font-size:14px;
                       color:#e3e8f0;">Structured Reports</div>
           <div style="font-family:'Inter'; font-size:12.5px; color:#7c8595;
@@ -497,15 +573,59 @@ if st.session_state.page == "cover":
     </div>
     """, unsafe_allow_html=True)
 
-    _lc1, _lc2, _lc3 = st.columns([1.15, 0.85, 1])
-    with _lc1:
+    # Centered call-to-action — kept directly beneath the hero content
+    _lc1, _lc2, _lc3 = st.columns([1, 1.4, 1])
+    with _lc2:
         if st.button("Enter Workstation  →", use_container_width=True,
                      type="primary", key="enter_btn"):
-            st.session_state.page = "worklist"
+            # Show an animated buffering visual while the first study loads,
+            # so the user knows the system is working.
+            _loader = st.empty()
+            _loader.markdown("""
+            <style>
+              @keyframes cxrSpin { to { transform: rotate(360deg); } }
+              @keyframes cxrBar  { 0% { left:-40%; } 100% { left:100%; } }
+              @keyframes cxrPing { 0%,100% { opacity:0.35; } 50% { opacity:1; } }
+              .cxr-load-wrap { display:flex; flex-direction:column;
+                  align-items:center; justify-content:center; gap:18px;
+                  padding:46px 0 30px; animation:cxrPing 2s ease-in-out infinite; }
+              .cxr-spin { width:54px; height:54px; border-radius:50%;
+                  border:4px solid #283a55; border-top-color:#4d8ef0;
+                  animation:cxrSpin 0.8s linear infinite; }
+              .cxr-track { position:relative; width:240px; height:4px;
+                  background:#222a36; border-radius:3px; overflow:hidden; }
+              .cxr-track::after { content:""; position:absolute; top:0;
+                  width:40%; height:100%; border-radius:3px;
+                  background:linear-gradient(90deg,transparent,#4d8ef0,#74aaff,transparent);
+                  animation:cxrBar 1.1s ease-in-out infinite; }
+              .cxr-txt { font-family:'JetBrains Mono',monospace; font-size:12px;
+                  letter-spacing:2px; color:#74aaff; text-transform:uppercase; }
+            </style>
+            <div class="cxr-load-wrap">
+              <div class="cxr-spin"></div>
+              <div class="cxr-track"></div>
+              <div class="cxr-txt">Loading workstation…</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Preload the first study so the viewer opens with data ready.
+            _rj_load = fetch_reports(st.session_state.api)
+            _reps    = _rj_load.get("reports", [])
+            _an_load = [r for r in _reps if r.get("status") == "analyzed"] or _reps
+            if _an_load:
+                _f = _an_load[0]
+                st.session_state.study_id = _f["image_id"]
+                _rx = req(f"/report/{_f['image_id']}", t=15)
+                if _rx:
+                    st.session_state.report = _rx.json()
+
+            _loader.empty()
+            # Land directly on the Viewer with the first study loaded.
+            st.session_state.page = "viewer"
             st.rerun()
 
     st.markdown("""
-    <div style="max-width:1080px; margin:18px auto 0; text-align:left;
+    <div style="max-width:1080px; margin:20px auto 0; text-align:center;
                 font-family:'Inter',sans-serif; font-size:11px; color:#414a58;">
         For demonstration and educational purposes only — not a certified
         medical device and not intended for clinical diagnosis.
@@ -576,10 +696,10 @@ if not ok:
     )
 
 # ── Page registry ─────────────────────────────────────────────
-PAGES = ["worklist", "viewer", "upload", "history", "settings", "tests"]
+PAGES = ["worklist", "viewer", "upload", "history", "settings"]
 PAGE_LABELS = {
     "worklist": "Worklist", "viewer": "Viewer", "upload": "Upload",
-    "history": "History", "settings": "Settings", "tests": "System Tests",
+    "history": "History", "settings": "Settings",
 }
 
 # ── Page navigation bar ───────────────────────────────────────
@@ -733,7 +853,7 @@ if PAGE == "worklist":
             with btn:
                 if st.button("Open", key=f"w{r.get('image_id')}",
                              use_container_width=True):
-                    with st.spinner("Opening study..."):
+                    with cxr_spinner("Opening study..."):
                         st.session_state.study_id = r.get("image_id")
                         rx = req(f"/report/{r.get('image_id')}")
                         if rx:
@@ -757,7 +877,7 @@ if PAGE == "worklist":
             with rcols[i]:
                 if st.button(f"...{rid[-8:]}", key=f"rec{rid}",
                              use_container_width=True):
-                    with st.spinner("Opening study..."):
+                    with cxr_spinner("Opening study..."):
                         st.session_state.study_id = rid
                         rx = req(f"/report/{rid}")
                         if rx:
@@ -770,7 +890,8 @@ if PAGE == "worklist":
 # VIEWER
 # ══════════════════════════════════════════════════════════
 if PAGE == "viewer":
-    # Auto-load most recent analyzed study if none selected
+    # Auto-load the FIRST study in the database if none selected, so the
+    # viewer shows data immediately without picking from the Worklist first.
     if not st.session_state.study_id:
         _rj_auto = fetch_reports(st.session_state.api)
         _analyzed = [r for r in _rj_auto.get("reports", [])
@@ -778,7 +899,7 @@ if PAGE == "viewer":
         if not _analyzed:
             _analyzed = _rj_auto.get("reports", [])
         if _analyzed:
-            _first = list(reversed(_analyzed))[0]
+            _first = _analyzed[0]
             st.session_state.study_id = _first["image_id"]
             _rx = req(f"/report/{_first['image_id']}", t=15)
             if _rx:
@@ -881,6 +1002,10 @@ if PAGE == "viewer":
                     Image unavailable — check API connection
                 </div>
                 """, unsafe_allow_html=True)
+                if st.button("Retry loading image",
+                             use_container_width=True, key="retry_img"):
+                    _fetch_image_bytes_cached.clear()
+                    st.rerun()
 
             # W/L Controls panel — like Synapse bottom bar
             st.markdown("""
@@ -944,7 +1069,7 @@ if PAGE == "viewer":
                 """, unsafe_allow_html=True)
                 if st.button("Run AI Analysis",
                              use_container_width=True, key="anb"):
-                    with st.spinner("Running PubMedCLIP analysis..."):
+                    with cxr_spinner("Running PubMedCLIP analysis..."):
                         rx = req(f"/analyze/{sid}",
                                  method="POST", t=120, no_cache=True)
                     if rx:
@@ -1053,7 +1178,7 @@ if PAGE == "viewer":
                 with ac1:
                     if st.button("Export PDF",
                                  use_container_width=True, key="epdf"):
-                        with st.spinner("Generating PDF..."):
+                        with cxr_spinner("Generating PDF..."):
                             pr = req(f"/export/{sid}", t=30)
                         if pr:
                             st.download_button(
@@ -1070,25 +1195,23 @@ if PAGE == "viewer":
                                 "Run in Colab: !pip install fpdf2 -q"
                             )
                 with ac2:
-                    if st.button("Run tests",
-                                 use_container_width=True, key="tst"):
-                        with st.spinner("Running functional tests..."):
-                            tr = req(f"/test/{sid}", t=180)
-                        if tr:
-                            tj = tr.json()
-                            sm = tj.get("summary",{})
-                            if tj.get("overall")=="PASS":
-                                st.success(
-                                    f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed — see System Tests page for details")
-                            else:
-                                st.error(
-                                    f"{sm.get('passed')}/{sm.get('total')} "
-                                    f"tests passed — see System Tests page for details")
+                    if st.button("Analysis",
+                                 use_container_width=True, key="reanalyze"):
+                        with cxr_spinner("Running PubMedCLIP analysis..."):
+                            rx = req(f"/analyze/{sid}",
+                                     method="POST", t=120, no_cache=True)
+                        if rx:
+                            st.session_state.report = rx.json()
+                            st.rerun()
+                        else:
+                            st.error(
+                                "Analysis failed or timed out. "
+                                "Check API connection and try again."
+                            )
 
                 if st.button("Delete study",
                              use_container_width=True, key="del"):
-                    with st.spinner("Deleting study..."):
+                    with cxr_spinner("Deleting study..."):
                         dx = req(f"/report/{sid}",
                                  method="DELETE", no_cache=True)
                     if dx:
@@ -1177,12 +1300,23 @@ if PAGE == "upload":
 
                     an = ra.json()
                     results.append((uid, an))
-                    # Keep last successful study as the active one
-                    st.session_state.study_id = uid
-                    st.session_state.report   = an
+                    # Make the FIRST successful study the active one so the
+                    # viewer opens on it directly.
+                    if st.session_state.study_id is None or \
+                       len(results) == 1:
+                        st.session_state.study_id = results[0][0]
+                        st.session_state.report   = results[0][1]
                     add_recent(uid)
 
                 prog.progress(100, text="Complete")
+
+                # No errors → jump straight to the viewer (first study loaded),
+                # so the user doesn't have to open studies one by one.
+                if results and not errors:
+                    st.session_state.study_id = results[0][0]
+                    st.session_state.report   = results[0][1]
+                    st.session_state.page      = "viewer"
+                    st.rerun()
 
                 if results:
                     st.markdown(f"""
@@ -1198,9 +1332,19 @@ if PAGE == "upload":
                     for uid, an in results:
                         dis5 = an.get("disease_label","—")
                         urg5, uc5 = URGENCY.get(dis5,("ROUTINE","#6abe6a"))
-                        data_row(an.get("filename", uid[:8]),
-                                 f"{dis5}  ·  {urg5}  ·  {an.get('total_time',0)}s",
-                                 color=uc5)
+                        _rcol, _bcol = st.columns([4, 1])
+                        with _rcol:
+                            data_row(an.get("filename", uid[:8]),
+                                     f"{dis5}  ·  {urg5}  ·  {an.get('total_time',0)}s",
+                                     color=uc5)
+                        with _bcol:
+                            if st.button("Open", key=f"upopen_{uid}",
+                                         use_container_width=True):
+                                st.session_state.study_id = uid
+                                st.session_state.report   = an
+                                add_recent(uid)
+                                st.session_state.page = "viewer"
+                                st.rerun()
 
                 if errors:
                     for e in errors:
@@ -1326,7 +1470,7 @@ if PAGE == "history":
                         if st.button("Open in Viewer",
                                      key=f"ho{iid}",
                                      use_container_width=True):
-                            with st.spinner("Opening study..."):
+                            with cxr_spinner("Opening study..."):
                                 st.session_state.study_id = iid
                                 rx = req(f"/report/{iid}")
                                 if rx:
@@ -1338,7 +1482,7 @@ if PAGE == "history":
                         if st.button("Delete",
                                      key=f"hd{iid}",
                                      use_container_width=True):
-                            with st.spinner("Deleting..."):
+                            with cxr_spinner("Deleting..."):
                                 req(f"/report/{iid}",
                                     method="DELETE", no_cache=True)
                             st.rerun()
@@ -1348,7 +1492,7 @@ if PAGE == "history":
             if not selected_ids:
                 st.warning("No studies selected. Tick the boxes first.")
             else:
-                with st.spinner(f"Deleting {len(selected_ids)} studies..."):
+                with cxr_spinner(f"Deleting {len(selected_ids)} studies..."):
                     for iid in selected_ids:
                         req(f"/report/{iid}", method="DELETE", no_cache=True)
                 st.success(f"Deleted {len(selected_ids)} studies")
@@ -1370,12 +1514,13 @@ if PAGE == "settings":
             help="Paste your Google Colab ngrok URL — "
                  "changes every time Colab restarts"
         )
+        
         if st.button("Save and test connection",
                      use_container_width=True, key="sv"):
             st.session_state.api = nu.rstrip("/")
             fetch_reports.clear()
             fetch_health.clear()
-            with st.spinner("Testing connection..."):
+            with cxr_spinner("Testing connection..."):
                 hh = fetch_health(st.session_state.api)
             if hh:
                 st.success(
@@ -1473,161 +1618,3 @@ if PAGE == "settings":
                             color:#4a5368;">{info5}</div>
             </div>
             """, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════
-# SYSTEM TESTS
-# ══════════════════════════════════════════════════════════
-if PAGE == "tests":
-    section("System Functionality Test Suite")
-
-    st.markdown("""
-    <div style="font-family:'Inter',sans-serif; font-size:13px;
-                color:#6a7385; margin-bottom:20px; line-height:1.8;">
-        Runs all system tests against the live backend.<br>
-        Covers: image availability, VLM inference (PubMedCLIP),
-        output structure validation, LLM report generation (TinyLlama),
-        full end-to-end pipeline, API health, and database connectivity.
-    </div>
-    """, unsafe_allow_html=True)
-
-    _tc1, _tc2 = st.columns([1, 3])
-    with _tc1:
-        run_tests = st.button("Run All Tests", use_container_width=True,
-                              key="run_sys_tests", type="primary")
-    with _tc2:
-        if not ok:
-            st.warning("API is offline — start the backend (Colab Cell 8) first.")
-        else:
-            st.info("Backend is online. Click Run All Tests to validate the full system.")
-
-    if run_tests:
-        if not ok:
-            st.error("Cannot run tests — API is offline.")
-        else:
-            with st.spinner("Running system tests — this may take 1-2 min on first run while models load..."):
-                tr = req("/test", t=300)
-
-            if not tr:
-                st.error("Test endpoint unreachable. Make sure Colab Cell 8 is running.")
-            else:
-                tj      = tr.json()
-                sm      = tj.get("summary", {})
-                overall = tj.get("overall", "FAIL")
-                tests   = tj.get("tests", [])
-
-                # ── Summary bar ───────────────────────────────────
-                pass_rate = (sm.get("passed", 0) / sm.get("total", 1)) * 100
-                _m1, _m2, _m3, _m4, _m5 = st.columns(5)
-                _m1.metric("Result",   overall)
-                _m2.metric("Passed",   sm.get("passed", 0))
-                _m3.metric("Failed",   sm.get("failed", 0))
-                _m4.metric("Skipped",  sm.get("skipped", 0))
-                _m5.metric("Pass Rate", f"{pass_rate:.0f}%")
-
-                st.markdown("<div style='height:12px'></div>",
-                            unsafe_allow_html=True)
-
-                if overall == "PASS":
-                    st.success(
-                        f"All {sm.get('passed')} tests passed — "
-                        f"system is fully functional."
-                    )
-                else:
-                    failed_names = [t.get("name") for t in tests
-                                    if t.get("status") == "FAIL"]
-                    st.error(
-                        f"{sm.get('failed')} test(s) failed: "
-                        f"{', '.join(failed_names)}"
-                    )
-
-                st.markdown("<div style='height:16px'></div>",
-                            unsafe_allow_html=True)
-                section("Test Results")
-
-                # ── Individual test rows ──────────────────────────
-                for _t in tests:
-                    _status = _t.get("status", "FAIL")
-                    if _status == "PASS":
-                        _dot = "#4abe4a"; _bg = "#162316"
-                        _bdr = "#265626"; _lbl = "#72c472"
-                    elif _status == "SKIP":
-                        _dot = "#6a7385"; _bg = "#1a1e26"
-                        _bdr = "#2e3442"; _lbl = "#6a7385"
-                    else:
-                        _dot = "#e07070"; _bg = "#231616"
-                        _bdr = "#562626"; _lbl = "#e07878"
-
-                    # Extra info: disease scores for VLM test
-                    _extra = ""
-                    if _status == "PASS" and "top_diseases" in _t:
-                        _scores = "".join(
-                            f'<span style="margin-right:10px; color:#c8d0e0;">'
-                            f'{d} <b style="color:#72c472;">{int(s*100)}%</b></span>'
-                            for d, s in _t.get("top_diseases", [])[:3]
-                        )
-                        _extra = (
-                            f'<div style="margin-top:5px; padding-left:18px; '
-                            f'font-family:\'JetBrains Mono\',monospace; font-size:11px;">'
-                            f'{_scores}</div>'
-                        )
-
-                    # Timing badge
-                    _time_badge = ""
-                    if "response_time" in _t:
-                        _time_badge = (
-                            f'<span style="font-family:\'JetBrains Mono\',monospace; '
-                            f'font-size:10px; color:#4a5368; margin-left:8px;">'
-                            f'{_t["response_time"]}s</span>'
-                        )
-
-                    st.markdown(f"""
-                    <div style="background:{_bg}; border:1px solid {_bdr};
-                                border-radius:6px; padding:11px 16px;
-                                margin-bottom:6px;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <span style="width:8px; height:8px; border-radius:50%;
-                                         background:{_dot}; flex-shrink:0;
-                                         display:inline-block;"></span>
-                            <span style="font-family:'Inter',sans-serif; font-size:13px;
-                                         font-weight:600; color:{_lbl}; flex:1;">
-                                {_t.get('name')}
-                            </span>
-                            {_time_badge}
-                            <span style="font-family:'JetBrains Mono',monospace;
-                                         font-size:11px; font-weight:700;
-                                         color:{_dot};">{_status}</span>
-                        </div>
-                        <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
-                                    color:#4a5368; padding-left:18px; margin-top:3px;
-                                    word-break:break-word;">
-                            {_t.get('detail', '')}
-                        </div>
-                        {_extra}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                # ── LLM Report preview if available ──────────────
-                _llm_test = next(
-                    (t for t in tests if "LLM" in t.get("name", "")), None
-                )
-                if _llm_test and _llm_test.get("status") == "PASS":
-                    st.markdown("<div style='height:10px'></div>",
-                                unsafe_allow_html=True)
-                    section("TinyLlama Sample Report (from test run)")
-                    st.markdown(f"""
-                    <div style="background:#232830; border:1px solid #2e3442;
-                                border-left:3px solid #4d8ef0; border-radius:6px;
-                                padding:14px 16px; font-family:'Inter',sans-serif;
-                                font-size:13px; color:#d8dce8; line-height:1.8;">
-                        {_llm_test.get('detail', '—')}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                st.markdown(f"""
-                <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
-                            color:#363d4e; margin-top:10px;">
-                    Tested: {tj.get('test_date','')[:19].replace('T','  ')}
-                    &nbsp;·&nbsp; {sm.get('total', 0)} tests total
-                </div>
-                """, unsafe_allow_html=True)

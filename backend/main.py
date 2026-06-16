@@ -291,13 +291,15 @@ async def startup_event():
     except Exception as e:
         print(f"  [Startup] PubMedCLIP pre-load skipped: {e}")
 
-    print("  [Startup] Pre-loading TinyLlama model...")
+    print("  [Startup] Checking Ollama LLM backend...")
     try:
-        from llm_refine import load_tinyllama
-        load_tinyllama()
-        print("  [Startup] TinyLlama ready")
+        from llm_refine import _ollama_available, OLLAMA_VISION_MODEL
+        if _ollama_available():
+            print(f"  [Startup] Ollama reachable — vision model '{OLLAMA_VISION_MODEL}'")
+        else:
+            print("  [Startup] WARNING: Ollama unreachable — start `ollama serve`")
     except Exception as e:
-        print(f"  [Startup] TinyLlama pre-load skipped: {e}")
+        print(f"  [Startup] LLM check skipped: {e}")
 
     print("  [Startup] API ready!")
     print("=" * 55)
@@ -772,7 +774,7 @@ async def system_status():
         "total_reports"   : len(list_records()),
         "models_loaded"   : {
             "vlm" : "PubMedCLIP (flaviagiammarino/pubmed-clip-vit-base-patch32)",
-            "llm" : "Template Report Generator",
+            "llm" : "Ollama vision (llama3.2-vision)",
         },
         "inference_only"  : True,
         "training"        : False,

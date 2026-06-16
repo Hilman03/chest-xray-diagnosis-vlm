@@ -117,33 +117,42 @@ class TestLLMRefine:
 
     def test_returns_dict(self, sample_caption, sample_label, sample_top_diseases):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
-             patch("models.llm_refine._generate", return_value=self._mock_generate(
+        with patch("models.llm_refine._ollama_available", return_value=True), \
+             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
                  sample_caption, sample_label, sample_top_diseases)):
             result = refine_llm(sample_caption, sample_label, sample_top_diseases)
         assert "report" in result
         assert "backend" in result
         assert "response_time" in result
 
-    def test_backend_is_tinyllama(self, sample_caption, sample_label):
+    def test_backend_is_ollama_when_available(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
-             patch("models.llm_refine._generate", return_value=self._mock_generate(
+        with patch("models.llm_refine._ollama_available", return_value=True), \
+             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
                  sample_caption, sample_label)):
             result = refine_llm(sample_caption, sample_label)
-        assert result["backend"] == "tinyllama"
+        assert result["backend"] == "ollama"
+
+    def test_backend_is_ollama_vision_with_image(self, sample_caption, sample_label):
+        from models.llm_refine import refine_llm
+        with patch("models.llm_refine._ollama_available", return_value=True), \
+             patch("models.llm_refine.ENABLE_VISION", True), \
+             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
+                 sample_caption, sample_label)):
+            result = refine_llm(sample_caption, sample_label, image_path="x.png")
+        assert result["backend"] == "ollama-vision"
 
     def test_report_not_empty(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
-             patch("models.llm_refine._generate", return_value=self._mock_generate(
+        with patch("models.llm_refine._ollama_available", return_value=True), \
+             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
                  sample_caption, sample_label)):
             result = refine_llm(sample_caption, sample_label)
         assert len(result["report"]) > 20
 
-    def test_load_failure_raises(self, sample_caption, sample_label):
+    def test_ollama_down_raises(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=False):
+        with patch("models.llm_refine._ollama_available", return_value=False):
             with pytest.raises(RuntimeError):
                 refine_llm(sample_caption, sample_label)
 
