@@ -192,35 +192,54 @@ def _generate(caption: str, disease_label: str,
     ]
 
     # Use the model's chat template when available; fall back to a plain
-    # concatenation for tokenizers that don't define one.
+    # concatenation for tokenizers that don't define one. apply_chat_template
+    # may return a tensor, a dict, or a BatchEncoding depending on the
+    # transformers version — normalise all three to a plain input_ids tensor.
     try:
-        input_ids = _tokenizer.apply_chat_template(
+        enc = _tokenizer.apply_chat_template(
             messages, tokenize=True,
             add_generation_prompt=True, return_tensors="pt",
-        ).to(DEVICE)
+        )
     except Exception:
         flat = f"{SYSTEM_MSG}\n\n{prompt}\n\nReport:\n"
-        input_ids = _tokenizer(flat, return_tensors="pt").input_ids.to(DEVICE)
+        enc = _tokenizer(flat, return_tensors="pt")
 
-    with torch.no_grad():
-        output = _model.generate(
-            input_ids,
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=True,
-            temperature=GEN_TEMPERATURE,
-            top_p=GEN_TOP_P,
-            repetition_penalty=GEN_REPEAT_PEN,
-            pad_token_id=_tokenizer.eos_token_id,
-        )
+    if hasattr(enc, "input_ids"):          # BatchEncoding
+        input_ids = enc.input_ids
+    elif isinstance(enc, dict):            # plain dict
+        input_ids = enc["input_ids"]
+    else:                                  # already a tensor
+        input_ids = enc
+    input_ids      = input_ids.to(DEVICE)
+    attention_mask = torch.ones_like(input_ids)
+    pad_id         = _tokenizer.pad_token_id or _tokenizer.eos_token_id
+
+    try:
+        with torch.no_grad():
+            output = _model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=MAX_NEW_TOKENS,
+                do_sample=True,
+                temperature=GEN_TEMPERATURE,
+                top_p=GEN_TOP_P,
+                repetition_penalty=GEN_REPEAT_PEN,
+                pad_token_id=pad_id,
+            )
+    except Exception as e:
+        # Never let a blank-message exception bubble up unlabelled.
+        raise RuntimeError(
+            f"LLM generate() failed [{type(e).__name__}]: {e}"
+        ) from e
 
     # Decode only the newly generated tokens (skip the prompt).
-    gen = output[0][input_ids.shape[-1]:]
+    gen  = output[0][input_ids.shape[-1]:]
     text = _tokenizer.decode(gen, skip_special_tokens=True).strip()
     text = _clean_report(text)
 
     if text and len(text) > 20:
         return text
-    raise ValueError(f"LLM returned unusable output: '{text}'")
+    raise ValueError(f"LLM returned unusable output (len={len(text)}): {text[:80]!r}")
 
 
 # ─────────────────────────────────────────────────────────────

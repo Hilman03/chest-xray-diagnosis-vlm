@@ -101,9 +101,15 @@ def run_pipeline(image_path: str) -> dict:
         print(f"  [Pipeline] Step 2 done in {llm_result['response_time']}s")
 
     except Exception as e:
+        import traceback
+        # Some exceptions carry an empty str(e), which hid the real cause
+        # before — always include the exception type, and print the full
+        # traceback so the failing line is visible in the logs.
+        detail = f"{type(e).__name__}: {e}".strip().rstrip(":").strip()
         result["status"] = "error"
-        result["error"]  = str(e)
-        print(f"  [Pipeline] ERROR: {e}")
+        result["error"]  = detail or type(e).__name__
+        print(f"  [Pipeline] ERROR: {result['error']}")
+        traceback.print_exc()
 
     result["total_time"] = round(time.time() - start, 3)
     print(f"  [Pipeline] Total: {result['total_time']}s")
