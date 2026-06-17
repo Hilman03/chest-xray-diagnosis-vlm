@@ -36,10 +36,12 @@ DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_NEW_TOKENS = 350
 
-# Deterministic-leaning decoding — low temperature + nucleus + repeat penalty.
-GEN_TEMPERATURE = 0.2
-GEN_TOP_P       = 0.85
-GEN_REPEAT_PEN  = 1.3
+# Greedy decoding (no sampling) for reliability and determinism. Sampling in
+# fp16 on GPU can yield inf/nan probabilities and crash generate() with an
+# unhelpful/blank error; greedy avoids that entirely. A repetition penalty +
+# no-repeat-ngram window keep a small model from looping.
+GEN_REPEAT_PEN      = 1.3
+GEN_NO_REPEAT_NGRAM = 3
 
 # Singleton — loaded once, kept in memory for the whole process lifetime.
 _model     = None
@@ -220,10 +222,9 @@ def _generate(caption: str, disease_label: str,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=True,
-                temperature=GEN_TEMPERATURE,
-                top_p=GEN_TOP_P,
+                do_sample=False,                       # greedy — no fp16 nan crash
                 repetition_penalty=GEN_REPEAT_PEN,
+                no_repeat_ngram_size=GEN_NO_REPEAT_NGRAM,
                 pad_token_id=pad_id,
             )
     except Exception as e:
