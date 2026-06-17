@@ -226,6 +226,54 @@ def generate_pdf(record: dict) -> bytes:
                 pdf.cell(50,  7, f"{score*100:.1f}%", border=1, ln=True)
         pdf.ln(5)
 
+        # Chest X-ray + Grad-CAM heatmap, side by side. Best-effort: if the
+        # image or the heatmap can't be produced, the report still generates.
+        try:
+            import tempfile
+            img_obj = None
+            ip = record.get("image_path", "")
+            if ip and Path(ip).exists():
+                img_obj = Image.open(ip).convert("RGB")
+            else:
+                _d = gridfs_get(record.get("image_id", ""))
+                if _d:
+                    img_obj = Image.open(io.BytesIO(_d)).convert("RGB")
+
+            if img_obj is not None:
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 8, "Chest X-Ray and AI Attention Heatmap (Grad-CAM)",
+                         ln=True)
+                _y = pdf.get_y()
+
+                _ot = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                img_obj.save(_ot.name); _ot.close()
+                pdf.image(_ot.name, x=15, y=_y, w=85)
+
+                _ht = None
+                try:
+                    from vlm_inference import compute_gradcam
+                    _heat = compute_gradcam(
+                        img_obj, record.get("disease_label") or "No Finding")
+                    _ht = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    _ht.write(_heat); _ht.close()
+                    pdf.image(_ht.name, x=110, y=_y, w=85)
+                except Exception as _he:
+                    print(f"  [PDF] heatmap skipped: {_he}")
+
+                pdf.set_y(_y + 87)
+                pdf.set_font("Arial", "I", 8)
+                pdf.multi_cell(0, 4, _latin1(
+                    "Left: chest radiograph.  Right: Grad-CAM heatmap - warm "
+                    "regions show where PubMedCLIP focused for the predicted "
+                    "finding (explainability only, not precise localization)."))
+                pdf.ln(3)
+
+                os.unlink(_ot.name)
+                if _ht is not None:
+                    os.unlink(_ht.name)
+        except Exception as _ie:
+            print(f"  [PDF] image section skipped: {_ie}")
+
         # LLM Report
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, "LLM Generated Observational Report", ln=True)
