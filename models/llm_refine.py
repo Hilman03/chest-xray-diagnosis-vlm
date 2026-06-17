@@ -237,7 +237,14 @@ def _generate_ollama(caption: str, disease_label: str,
         json=payload,
         timeout=OLLAMA_TIMEOUT,
     )
-    r.raise_for_status()
+    # Surface Ollama's actual error body (e.g. an OOM "model runner has
+    # stopped" message) instead of a bare HTTP status, so failures are
+    # diagnosable from the backend logs.
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"Ollama /api/chat HTTP {r.status_code} for model '{model}': "
+            f"{r.text[:400]}"
+        )
     text = r.json().get("message", {}).get("content", "").strip()
     text = _clean_report(text)
 
@@ -281,9 +288,23 @@ def refine_llm(caption: str, disease_label: str,
 
     print(f"  [LLM] Generating report with Ollama ({model_name})"
           f"{' + image' if use_vision else ''}...")
-    report  = _generate_ollama(caption, disease_label, top_diseases, image_path)
+    try:
+        report = _generate_ollama(caption, disease_label, top_diseases, image_path)
+    except Exception as e:
+        # The vision model can fail on constrained GPUs (e.g. a T4 OOM returns
+        # HTTP 500 from /api/chat). Rather than fail the whole analysis, degrade
+        # gracefully to a text-only report grounded in the PubMedCLIP findings.
+        if use_vision:
+            print(f"  [LLM] Vision generation failed ({e}); "
+                  f"falling back to text-only report...")
+            report  = _generate_ollama(caption, disease_label,
+                                       top_diseases, image_path=None)
+            backend = "ollama-text-fallback"
+        else:
+            raise
+
     elapsed = round(time.time() - start, 3)
-    print(f"  [LLM] Report generated in {elapsed}s")
+    print(f"  [LLM] Report generated in {elapsed}s (backend: {backend})")
 
     return {
         "report"        : report,
