@@ -316,6 +316,7 @@ for k, v in {
     "search"     : "",
     "last_ids"   : [],
     "retry_count": 0,
+    "last_error" : "",
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -374,14 +375,30 @@ def req(path, method="GET", t=10, no_cache=False, **kw):
         if no_cache:
             fetch_reports.clear()
             fetch_health.clear()
-        return r if r.ok else None
+        if r.ok:
+            st.session_state.last_error = ""
+            return r
+        # Surface the backend's real error (FastAPI puts it in `detail`) so the
+        # UI can show *why* a call failed instead of a generic message.
+        try:
+            st.session_state.last_error = str(r.json().get("detail",
+                                                            f"HTTP {r.status_code}"))
+        except Exception:
+            st.session_state.last_error = f"HTTP {r.status_code}: {r.text[:300]}"
+        return None
     except requests.exceptions.Timeout:
         st.session_state.retry_count += 1
+        st.session_state.last_error = (
+            f"Request timed out after {t}s (the server may still be loading "
+            "models or generating — try again in a moment)."
+        )
         return None
     except requests.exceptions.ConnectionError:
         st.session_state.ok = False
+        st.session_state.last_error = "Could not connect to the API."
         return None
-    except:
+    except Exception as e:
+        st.session_state.last_error = f"{type(e).__name__}: {e}"
         return None
 
 def wl_img(raw):
@@ -599,7 +616,7 @@ if st.session_state.page == "cover":
             _reps    = _rj_load.get("reports", [])
             _an_load = [r for r in _reps if r.get("status") == "analyzed"] or _reps
             if _an_load:
-                _f = _an_load[0]
+                _f = _an_load[-1]          # newest = top of worklist
                 st.session_state.study_id = _f["image_id"]
                 _rx = req(f"/report/{_f['image_id']}", t=15)
                 if _rx:
@@ -869,8 +886,9 @@ if PAGE == "worklist":
 # VIEWER
 # ══════════════════════════════════════════════════════════
 if PAGE == "viewer":
-    # Auto-load the FIRST study in the database if none selected, so the
-    # viewer shows data immediately without picking from the Worklist first.
+    # Auto-load the study at the TOP of the worklist (newest) if none selected,
+    # so the viewer opens on the most recent study without picking first.
+    # /reports is oldest→newest, so the newest analyzed study is the last one.
     if not st.session_state.study_id:
         _rj_auto = fetch_reports(st.session_state.api)
         _analyzed = [r for r in _rj_auto.get("reports", [])
@@ -878,7 +896,7 @@ if PAGE == "viewer":
         if not _analyzed:
             _analyzed = _rj_auto.get("reports", [])
         if _analyzed:
-            _first = _analyzed[0]
+            _first = _analyzed[-1]          # newest = top of worklist
             st.session_state.study_id = _first["image_id"]
             _rx = req(f"/report/{_first['image_id']}", t=15)
             if _rx:
@@ -1061,14 +1079,14 @@ if PAGE == "viewer":
                              use_container_width=True, key="anb"):
                     with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
                         rx = req(f"/analyze/{sid}",
-                                 method="POST", t=120, no_cache=True)
+                                 method="POST", t=180, no_cache=True)
                     if rx:
                         st.session_state.report = rx.json()
                         st.rerun()
                     else:
                         st.error(
-                            "Analysis failed or timed out. "
-                            "Check API connection and try again."
+                            "Analysis failed: "
+                            f"{st.session_state.get('last_error') or 'unknown error'}"
                         )
             else:
                 # ── Study Information panel — single summary of the study,
@@ -1228,14 +1246,14 @@ if PAGE == "viewer":
                                  use_container_width=True, key="reanalyze"):
                         with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
                             rx = req(f"/analyze/{sid}",
-                                     method="POST", t=120, no_cache=True)
+                                     method="POST", t=180, no_cache=True)
                         if rx:
                             st.session_state.report = rx.json()
                             st.rerun()
                         else:
                             st.error(
-                                "Analysis failed or timed out. "
-                                "Check API connection and try again."
+                                "Analysis failed: "
+                                f"{st.session_state.get('last_error') or 'unknown error'}"
                             )
 
                 if st.button("Delete study",
@@ -1325,7 +1343,10 @@ if PAGE == "upload":
                     ra = req(f"/analyze/{uid}", method="POST",
                              t=180, no_cache=True)
                     if not ra:
-                        errors.append(f"{up.name}: analysis failed/timed out")
+                        errors.append(
+                            f"{up.name}: "
+                            f"{st.session_state.get('last_error') or 'analysis failed'}"
+                        )
                         continue
 
                     an = ra.json()
