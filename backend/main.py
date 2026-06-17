@@ -51,7 +51,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(ROOT / "models"))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from dotenv import load_dotenv
@@ -555,6 +555,29 @@ async def get_report(image_id: str):
         elif field.is_required():
             data[name] = ""
     return ReportResponse(**data)
+
+
+# ═════════════════════════════════════════════════════════════
+# ENDPOINT 3b — POST /report/{image_id}/edit  (edit the report text)
+# ═════════════════════════════════════════════════════════════
+@app.post("/report/{image_id}/edit")
+async def edit_report(image_id: str, llm_report: str = Body(..., embed=True)):
+    """Save a radiologist-edited observation report, with an audit stamp."""
+    record = get_record(image_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    record["llm_report"]   = llm_report
+    record["report_edited"] = True
+    record["edited_at"]     = datetime.now().isoformat()
+    save_record(image_id, record)
+
+    return {
+        "image_id"      : image_id,
+        "llm_report"    : llm_report,
+        "report_edited" : True,
+        "edited_at"     : record["edited_at"],
+    }
 
 
 # ═════════════════════════════════════════════════════════════

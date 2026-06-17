@@ -425,7 +425,7 @@ def add_recent(image_id):
         ids.insert(0, image_id)
     st.session_state.last_ids = ids[:5]
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 @contextmanager
 def cxr_spinner(text="Loading"):
@@ -712,11 +712,22 @@ for _i, _pg in enumerate(PAGES):
 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 PAGE = st.session_state.page
 
+# Show the full-screen loading overlay while a page fetches its data, but only
+# right after the user navigates to it (page changed) — so cached re-renders
+# don't flash a spinner.
+_navigating = st.session_state.get("_prev_page") != PAGE
+st.session_state._prev_page = PAGE
+
+def page_loading(label):
+    """Loading overlay during a page's initial fetch, only when navigating."""
+    return cxr_spinner(f"Loading {label}…") if _navigating else nullcontext()
+
 # ══════════════════════════════════════════════════════════
 # WORKLIST
 # ══════════════════════════════════════════════════════════
 if PAGE == "worklist":
-    rj  = fetch_reports(st.session_state.api)
+    with page_loading("Worklist"):
+        rj = fetch_reports(st.session_state.api)
     rps = rj.get("reports",[])
     ana = sum(1 for r in rps if r.get("status")=="analyzed")
 
@@ -962,7 +973,8 @@ if PAGE == "viewer":
         with left:
             # Cached fetch — only hits network once per study, so slider
             # adjustments (brightness/contrast/W-L) reprocess locally and stay instant
-            raw_img = fetch_image_bytes(st.session_state.api, sid)
+            with page_loading("Viewer"):
+                raw_img = fetch_image_bytes(st.session_state.api, sid)
             if raw_img:
                 # Apply W/L processing locally (fast, no network)
                 processed = wl_img(raw_img)
@@ -1191,7 +1203,8 @@ if PAGE == "viewer":
                     """, unsafe_allow_html=True)
 
                 # Observational report
-                section("Observational Report")
+                _edited_flag = " · edited" if rep.get("report_edited") else ""
+                section("Observational Report" + _edited_flag)
                 report_text = rep.get("llm_report","—")
                 st.markdown(f"""
                 <div style="background:#232830; border:1px solid #2e3442;
@@ -1201,6 +1214,32 @@ if PAGE == "viewer":
                     {report_text}
                 </div>
                 """, unsafe_allow_html=True)
+
+                # Editable report — radiologist can correct/add to the text.
+                with st.expander("✎ Edit report"):
+                    _edited = st.text_area(
+                        "Observation report",
+                        value=rep.get("llm_report", ""),
+                        height=220,
+                        label_visibility="collapsed",
+                        key=f"edit_{sid}",
+                    )
+                    if st.button("Save report", use_container_width=True,
+                                 key=f"savereport_{sid}"):
+                        with cxr_spinner("Saving report..."):
+                            er = req(f"/report/{sid}/edit", method="POST",
+                                     t=20, no_cache=True,
+                                     json={"llm_report": _edited})
+                        if er:
+                            st.session_state.report["llm_report"]    = _edited
+                            st.session_state.report["report_edited"] = True
+                            st.success("Report saved.")
+                            st.rerun()
+                        else:
+                            st.error(
+                                "Save failed: "
+                                f"{st.session_state.get('last_error') or 'unknown error'}"
+                            )
 
                 st.markdown(f"""
                 <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
@@ -1453,7 +1492,8 @@ if PAGE == "upload":
 # HISTORY
 # ══════════════════════════════════════════════════════════
 if PAGE == "history":
-    rj3 = fetch_reports(st.session_state.api)
+    with page_loading("History"):
+        rj3 = fetch_reports(st.session_state.api)
     rp3 = rj3.get("reports",[])
 
     st.markdown(f"""
@@ -1585,7 +1625,8 @@ if PAGE == "history":
 # PERFORMANCE  — processing-metrics dashboard
 # ══════════════════════════════════════════════════════════
 if PAGE == "performance":
-    rjp = fetch_reports(st.session_state.api)
+    with page_loading("Performance"):
+        rjp = fetch_reports(st.session_state.api)
     # Only analyzed studies carry timing metrics.
     # /reports returns records oldest → newest, so the trend already reads
     # left-to-right chronologically.
@@ -1716,7 +1757,8 @@ if PAGE == "settings":
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         section("System Status")
 
-        sr = req("/status")
+        with page_loading("Settings"):
+            sr = req("/status")
         if sr:
             sj = sr.json()
             data_row("API",          "Running",                      "#72c472")
