@@ -232,6 +232,102 @@ def infer_vlm_with_label(image_path: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# GRAD-CAM EXPLAINABILITY (heatmap of where PubMedCLIP "looked")
+# ─────────────────────────────────────────────────────────────
+def _jet_colormap(cam):
+    """Map a HxW array in [0,1] to a jet-like RGB uint8 image (numpy only)."""
+    import numpy as np
+    r = np.clip(1.5 - np.abs(4 * cam - 3), 0, 1)
+    g = np.clip(1.5 - np.abs(4 * cam - 2), 0, 1)
+    b = np.clip(1.5 - np.abs(4 * cam - 1), 0, 1)
+    return (np.stack([r, g, b], axis=-1) * 255).astype("uint8")
+
+
+def compute_gradcam(image, disease_label: str) -> bytes:
+    """
+    Grad-CAM heatmap for PubMedCLIP — highlights the image regions that most
+    drove the similarity to the predicted disease's text description. This is
+    a visualization of the EXISTING model (gradients of its own score); it adds
+    no new model and does not change the architecture.
+
+    Args:
+        image         : a PIL.Image (RGB) of the chest X-ray
+        disease_label : the predicted disease to explain
+
+    Returns:
+        PNG bytes of the X-ray with the heatmap overlaid.
+    """
+    import io
+    import numpy as np
+
+    if not load_model():
+        raise RuntimeError("PubMedCLIP unavailable — cannot compute Grad-CAM.")
+
+    image = image.convert("RGB")
+    text  = DISEASE_TEMPLATES.get(
+        disease_label, f"Chest X-Ray showing {disease_label}")
+
+    inputs = _processor(text=[text], images=image,
+                        return_tensors="pt", padding=True)
+    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+
+    # Capture activations + gradients of the last vision transformer block.
+    layer = _model.vision_model.encoder.layers[-1]
+    store = {}
+
+    def _fwd_hook(_m, _i, out):
+        h = out[0] if isinstance(out, tuple) else out
+        h.retain_grad()
+        store["act"] = h
+
+    handle = layer.register_forward_hook(_fwd_hook)
+    try:
+        _model.zero_grad(set_to_none=True)
+        with torch.enable_grad():
+            out   = _model(**inputs)
+            score = out.logits_per_image[0, 0]   # image↔disease-text similarity
+            score.backward()
+    finally:
+        handle.remove()
+
+    act  = store["act"].detach().float()        # [1, tokens, dim]
+    grad = act.grad if act.grad is not None else store["act"].grad
+    grad = grad.detach().float()                 # [1, tokens, dim]
+
+    # Canonical Grad-CAM: channel weights = global-average-pooled gradients,
+    # CAM = ReLU(sum_c w_c * activation_c) per token.
+    weights = grad.mean(dim=1, keepdim=True)     # [1, 1, dim]
+    cam     = (weights * act).sum(dim=-1)[0]     # [tokens]
+    cam     = cam[1:]                            # drop CLS token
+    cam     = torch.relu(cam)
+
+    side = int(cam.shape[0] ** 0.5)              # 49 -> 7 for patch32 @224
+    cam  = cam[: side * side].reshape(side, side)
+    cam  = cam.cpu().numpy().astype("float32")
+
+    # Suppress the broad baseline so only the strongest regions light up
+    # (map the median->99th-percentile range into 0..1). Keeps the heatmap
+    # focused instead of flooding the whole image.
+    lo = np.percentile(cam, 60)
+    hi = np.percentile(cam, 99)
+    cam = np.clip((cam - lo) / (hi - lo + 1e-8), 0, 1)
+
+    # Upsample the small CAM grid to image size with PIL (no cv2/scipy needed).
+    base = np.array(image.resize((224, 224))).astype("float32")
+    cam_img = Image.fromarray((cam * 255).astype("uint8")).resize(
+        (224, 224), Image.BILINEAR)
+    cam_up  = np.array(cam_img).astype("float32") / 255.0
+
+    color   = _jet_colormap(cam_up).astype("float32")
+    alpha   = (cam_up * 0.6)[..., None]          # hot areas colored, anatomy still visible
+    overlay = (base * (1 - alpha) + color * alpha).astype("uint8")
+
+    buf = io.BytesIO()
+    Image.fromarray(overlay).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────
 # Run directly to test
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":

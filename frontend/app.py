@@ -356,6 +356,23 @@ def fetch_image_bytes(api_url, image_id):
     except Exception:
         return None
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_heatmap_cached(api_url, image_id):
+    """Grad-CAM overlay bytes — cached; raises on failure so None isn't cached."""
+    r = requests.get(
+        api_url.rstrip("/") + f"/heatmap/{image_id}",
+        headers=HDR, timeout=90
+    )
+    if not r.ok or not r.content:
+        raise RuntimeError(f"heatmap fetch failed: HTTP {r.status_code}")
+    return r.content
+
+def fetch_heatmap_bytes(api_url, image_id):
+    try:
+        return _fetch_heatmap_cached(api_url, image_id)
+    except Exception:
+        return None
+
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_health(api_url):
     try:
@@ -996,11 +1013,37 @@ if PAGE == "viewer":
                 </div>
                 """, unsafe_allow_html=True)
 
-                st.image(
-                    Image.open(io.BytesIO(processed)),
-                    use_container_width=True,
-                    caption=None
-                )
+                # Grad-CAM heatmap toggle — only meaningful for analyzed studies.
+                show_heat = False
+                if sta == "analyzed":
+                    show_heat = st.checkbox(
+                        f"AI heatmap (Grad-CAM) — where the model focused for {dis}",
+                        value=False, key=f"heat_{sid}",
+                    )
+
+                if show_heat:
+                    with cxr_spinner("Computing Grad-CAM heatmap"):
+                        heat = fetch_heatmap_bytes(st.session_state.api, sid)
+                    if heat:
+                        st.image(Image.open(io.BytesIO(heat)),
+                                 use_container_width=True, caption=None)
+                        st.markdown("""
+                        <div style="font-family:'JetBrains Mono',monospace;
+                                    font-size:10px; color:#5a6a7a; padding:4px 2px;">
+                            Warm = stronger model attention. Explainability only
+                            (PubMedCLIP Grad-CAM), not a precise localization.
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.warning("Heatmap unavailable — showing the image instead.")
+                        st.image(Image.open(io.BytesIO(processed)),
+                                 use_container_width=True, caption=None)
+                else:
+                    st.image(
+                        Image.open(io.BytesIO(processed)),
+                        use_container_width=True,
+                        caption=None
+                    )
             else:
                 st.markdown("""
                 <div style="background:#000000; border:1px solid #1e2430;

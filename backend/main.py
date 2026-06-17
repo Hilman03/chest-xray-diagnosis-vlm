@@ -633,6 +633,40 @@ async def get_image(image_id: str):
 
 
 # ═════════════════════════════════════════════════════════════
+# ENDPOINT 5b — GET /heatmap/{image_id}  (Grad-CAM explainability)
+# ═════════════════════════════════════════════════════════════
+@app.get("/heatmap/{image_id}")
+async def get_heatmap(image_id: str):
+    """
+    Grad-CAM heatmap overlay showing where PubMedCLIP focused for the predicted
+    disease. Reuses the existing VLM (no new model). Falls back to the GridFS
+    image copy if the disk file is gone.
+    """
+    record = get_record(image_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Image not found.")
+
+    image_path = record.get("image_path", "")
+    if image_path and Path(image_path).exists():
+        img = Image.open(image_path)
+    else:
+        data = gridfs_get(image_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Image file not found.")
+        img = Image.open(io.BytesIO(data))
+
+    label = record.get("disease_label") or "No Finding"
+    try:
+        from vlm_inference import compute_gradcam
+        png = compute_gradcam(img, label)
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"Grad-CAM failed: {e}")
+
+    return StreamingResponse(io.BytesIO(png), media_type="image/png")
+
+
+# ═════════════════════════════════════════════════════════════
 # ENDPOINT 6 — GET /export/{image_id}
 # ═════════════════════════════════════════════════════════════
 @app.get("/export/{image_id}")
