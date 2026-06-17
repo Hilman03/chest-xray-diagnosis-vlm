@@ -60,6 +60,7 @@ from PIL import Image
 from database import (
     connect_mongodb, save_record, get_record, delete_record,
     list_records, store_exists, is_mongo_connected,
+    gridfs_put, gridfs_get,
 )
 from schemas import (
     UploadResponse, AnalyzeResponse,
@@ -300,15 +301,15 @@ async def startup_event():
     except Exception as e:
         print(f"  [Startup] PubMedCLIP pre-load skipped: {e}")
 
-    print("  [Startup] Checking Ollama LLM backend...")
+    print("  [Startup] Pre-loading LLM (in-process transformers)...")
     try:
-        from llm_refine import _ollama_available, OLLAMA_VISION_MODEL
-        if _ollama_available():
-            print(f"  [Startup] Ollama reachable — vision model '{OLLAMA_VISION_MODEL}'")
+        from llm_refine import load_llm, LLM_MODEL
+        if load_llm():
+            print(f"  [Startup] LLM ready — {LLM_MODEL}")
         else:
-            print("  [Startup] WARNING: Ollama unreachable — start `ollama serve`")
+            print(f"  [Startup] WARNING: LLM '{LLM_MODEL}' failed to load")
     except Exception as e:
-        print(f"  [Startup] LLM check skipped: {e}")
+        print(f"  [Startup] LLM pre-load skipped: {e}")
 
     # Resource-usage snapshot — verifies models are resident in memory and
     # helps monitor footprint. Skipped silently if psutil is unavailable.
@@ -370,9 +371,28 @@ async def upload_image(file: UploadFile = File(...)):
         try:
             if is_dicom:
                 dicom_metadata = handle_dicom(str(raw_path), str(processed_path))
+                # handle_dicom swallows its own errors and may NOT write a PNG.
+                # Never fall back to copying the raw .dcm to a .png name — that
+                # produces an unviewable file. Fail loudly instead so the user
+                # knows the DICOM pixel data could not be decoded.
+                if not Path(processed_path).exists():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Could not convert DICOM to an image. The file "
+                               "may lack standard pixel data or use an "
+                               "unsupported transfer syntax.",
+                    )
             else:
                 preprocess_image(str(raw_path), str(processed_path))
+        except HTTPException:
+            raise
         except Exception as e:
+            # Only PNG/JPG (already raster images) are safe to copy as-is.
+            if is_dicom:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not read DICOM image: {e}",
+                )
             shutil.copy(str(raw_path), str(processed_path))
             print(f"  [Upload] Preprocessing fallback: {e}")
 
@@ -389,6 +409,16 @@ async def upload_image(file: UploadFile = File(...)):
             "uploaded_at"    : datetime.now().isoformat(),
         }
         save_record(image_id, record)
+
+        # Persist the processed image in GridFS so it survives a server/Colab
+        # restart (the local data/uploads dir is wiped between sessions, but
+        # MongoDB keeps the report — without this the viewer can't show it).
+        if is_mongo_connected():
+            try:
+                with open(processed_path, "rb") as imgf:
+                    gridfs_put(image_id, imgf.read(), filename=file.filename)
+            except Exception as e:
+                print(f"  [Upload] GridFS store skipped: {e}")
 
         print(f"  [Upload] {file.filename} → {image_id}")
 
@@ -568,10 +598,15 @@ async def get_image(image_id: str):
         raise HTTPException(status_code=404, detail="Image not found.")
 
     image_path = record.get("image_path", "")
-    if not Path(image_path).exists():
-        raise HTTPException(status_code=404, detail="Image file not found.")
+    if image_path and Path(image_path).exists():
+        return FileResponse(image_path, media_type="image/png")
 
-    return FileResponse(image_path, media_type="image/png")
+    # Disk file missing (e.g. fresh session) — fall back to the GridFS copy.
+    data = gridfs_get(image_id)
+    if data:
+        return StreamingResponse(io.BytesIO(data), media_type="image/png")
+
+    raise HTTPException(status_code=404, detail="Image file not found.")
 
 
 # ═════════════════════════════════════════════════════════════

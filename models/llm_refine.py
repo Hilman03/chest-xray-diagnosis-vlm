@@ -1,20 +1,20 @@
 """
 models/llm_refine.py
 ====================
-LLM Report Generation — Ollama only (single backend).
+LLM Report Generation — in-process Hugging Face transformers (single backend).
 
-Backend : Ollama HTTP API  (http://localhost:11434)
-          Vision model reads the X-ray image directly; text model is used
-          only when no image is supplied or vision is disabled.
+No external server (no Ollama). The model is a small instruct LLM that runs
+directly in this Python process and is loaded ONCE as a singleton, so there is
+nothing to install or keep alive separately and nothing that can crash with a
+500 / OOM the way an external vision server does on a small GPU.
 
-The model receives the chest X-ray image plus the PubMedCLIP findings
-(confidence scores) as a second opinion. The prompt is constrained so the
+The model receives the PubMedCLIP findings (disease + confidence scores) and
+writes a structured observational report. The prompt is constrained so the
 report stays grounded and on-topic — no invented findings.
 
-Run Ollama:
-    ollama serve
-    ollama pull llama3.2-vision     # vision model (reads the image)
-    ollama pull llama3.2            # text model (no-image path)
+Model is configurable via the LLM_MODEL env var, e.g.:
+    TinyLlama/TinyLlama-1.1B-Chat-v1.0   (default — small, reliable)
+    Qwen/Qwen2.5-1.5B-Instruct           (better quality, still T4-friendly)
 """
 
 import os
@@ -25,21 +25,14 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import time
-import base64
-import requests
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-OLLAMA_URL     = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "120"))
-
-# Multimodal path — a vision LLM that actually SEES the X-ray image.
-# When enabled and an image is given, the report is grounded in the pixels
-# plus the PubMedCLIP findings (second opinion), instead of the label alone.
-ENABLE_VISION       = os.getenv("OLLAMA_USE_VISION", "1") not in ("0", "false", "False")
-OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "llama3.2-vision")
+LLM_MODEL = os.getenv("LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_NEW_TOKENS = 350
 
@@ -47,6 +40,10 @@ MAX_NEW_TOKENS = 350
 GEN_TEMPERATURE = 0.2
 GEN_TOP_P       = 0.85
 GEN_REPEAT_PEN  = 1.3
+
+# Singleton — loaded once, kept in memory for the whole process lifetime.
+_model     = None
+_tokenizer = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -62,20 +59,6 @@ SYSTEM_MSG = (
     "Do NOT invent measurements, laterality, locations, patient history, "
     "comparisons with priors, or treatment advice. Use professional "
     "radiology register, be concise and neutral, and stay strictly on-topic."
-)
-
-# Used only on the multimodal path, where the model can actually see the image.
-SYSTEM_MSG_VISION = (
-    "You are a board-certified radiologist reading the chest X-ray image "
-    "provided to you. Describe ONLY what is genuinely visible in this "
-    "radiograph. A separate AI tool (PubMedCLIP) has supplied candidate "
-    "findings with confidence scores — treat these as a second opinion: state "
-    "explicitly where the image agrees or disagrees with them rather than "
-    "repeating them uncritically. Calibrate wording to the visible evidence. "
-    "Do NOT invent patient history, prior studies, exact measurements, or "
-    "treatment advice, and do NOT claim to see findings that are not there. "
-    "Use professional radiology register, be concise and neutral, and stay "
-    "strictly on-topic to this chest X-ray."
 )
 
 
@@ -97,7 +80,7 @@ def _top_score(top_diseases: list) -> str:
 
 
 def _build_prompt(caption: str, disease_label: str,
-                  top_diseases: list = None, vision: bool = False) -> str:
+                  top_diseases: list = None) -> str:
     """User message: hand the model the exact facts and a fixed structure."""
     if top_diseases:
         findings_str = "\n".join(
@@ -107,22 +90,12 @@ def _build_prompt(caption: str, disease_label: str,
     else:
         findings_str = f"  - {disease_label}"
 
-    if vision:
-        findings_clause = (
-            f"2. Findings: describe what you actually see in this chest X-ray, "
-            f"focusing on the region relevant to {disease_label}. State whether "
-            f"the image supports the PubMedCLIP prediction of {disease_label} "
-            f"({_top_score(top_diseases)}), and mention the other listed "
-            f"findings only as lower-confidence considerations. Note relevant "
-            f"normal/clear areas where appropriate.\n"
-        )
-    else:
-        findings_clause = (
-            f"2. Findings: describe the radiographic appearance associated with "
-            f"{disease_label}, using wording calibrated to its confidence "
-            f"({_top_score(top_diseases)}). Mention the other listed findings "
-            f"only as lower-confidence considerations.\n"
-        )
+    findings_clause = (
+        f"2. Findings: describe the radiographic appearance associated with "
+        f"{disease_label}, using wording calibrated to its confidence "
+        f"({_top_score(top_diseases)}). Mention the other listed findings "
+        f"only as lower-confidence considerations.\n"
+    )
 
     return (
         f"PubMedCLIP image analysis findings:\n"
@@ -185,72 +158,69 @@ def _clean_report(text: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# OLLAMA BACKEND
+# MODEL — load once, keep in memory
 # ─────────────────────────────────────────────────────────────
-def _ollama_available() -> bool:
+def load_llm() -> bool:
+    """Load the LLM + tokenizer once. Safe to call repeatedly (no-op after)."""
+    global _model, _tokenizer
+    if _model is not None:
+        return True
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-        return r.ok
-    except Exception:
+        print(f"  [LLM] Loading : {LLM_MODEL}")
+        print(f"  [LLM] Device  : {DEVICE}")
+        _tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
+        _model = AutoModelForCausalLM.from_pretrained(
+            LLM_MODEL,
+            torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+        )
+        _model.to(DEVICE)
+        _model.eval()
+        print(f"  [LLM] Loaded successfully")
+        return True
+    except Exception as e:
+        print(f"  [LLM] Failed to load: {e}")
         return False
 
 
-def _encode_image(image_path: str) -> str:
-    """Base64-encode an image for Ollama's multimodal `images` field."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+def _generate(caption: str, disease_label: str,
+              top_diseases: list = None) -> str:
+    """Run the instruct model on the structured prompt and clean the output."""
+    prompt   = _build_prompt(caption, disease_label, top_diseases)
+    messages = [
+        {"role": "system", "content": SYSTEM_MSG},
+        {"role": "user",   "content": prompt},
+    ]
 
+    # Use the model's chat template when available; fall back to a plain
+    # concatenation for tokenizers that don't define one.
+    try:
+        input_ids = _tokenizer.apply_chat_template(
+            messages, tokenize=True,
+            add_generation_prompt=True, return_tensors="pt",
+        ).to(DEVICE)
+    except Exception:
+        flat = f"{SYSTEM_MSG}\n\n{prompt}\n\nReport:\n"
+        input_ids = _tokenizer(flat, return_tensors="pt").input_ids.to(DEVICE)
 
-def _generate_ollama(caption: str, disease_label: str,
-                     top_diseases: list = None,
-                     image_path: str = None) -> str:
-    """
-    Generate via Ollama. If image_path is given and vision is enabled, the
-    image is sent to a vision model so the report is grounded in the pixels.
-    """
-    use_vision = bool(image_path) and ENABLE_VISION
-    model      = OLLAMA_VISION_MODEL if use_vision else OLLAMA_MODEL
-    system_msg = SYSTEM_MSG_VISION if use_vision else SYSTEM_MSG
-    prompt     = _build_prompt(caption, disease_label, top_diseases, vision=use_vision)
-
-    user_msg = {"role": "user", "content": prompt}
-    if use_vision:
-        user_msg["images"] = [_encode_image(image_path)]
-
-    payload = {
-        "model"   : model,
-        "stream"  : False,
-        "messages": [
-            {"role": "system", "content": system_msg},
-            user_msg,
-        ],
-        "options": {
-            "temperature"   : GEN_TEMPERATURE,
-            "top_p"         : GEN_TOP_P,
-            "repeat_penalty": GEN_REPEAT_PEN,
-            "num_predict"   : MAX_NEW_TOKENS,
-        },
-    }
-
-    r = requests.post(
-        f"{OLLAMA_URL}/api/chat",
-        json=payload,
-        timeout=OLLAMA_TIMEOUT,
-    )
-    # Surface Ollama's actual error body (e.g. an OOM "model runner has
-    # stopped" message) instead of a bare HTTP status, so failures are
-    # diagnosable from the backend logs.
-    if r.status_code >= 400:
-        raise RuntimeError(
-            f"Ollama /api/chat HTTP {r.status_code} for model '{model}': "
-            f"{r.text[:400]}"
+    with torch.no_grad():
+        output = _model.generate(
+            input_ids,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=True,
+            temperature=GEN_TEMPERATURE,
+            top_p=GEN_TOP_P,
+            repetition_penalty=GEN_REPEAT_PEN,
+            pad_token_id=_tokenizer.eos_token_id,
         )
-    text = r.json().get("message", {}).get("content", "").strip()
+
+    # Decode only the newly generated tokens (skip the prompt).
+    gen = output[0][input_ids.shape[-1]:]
+    text = _tokenizer.decode(gen, skip_special_tokens=True).strip()
     text = _clean_report(text)
 
     if text and len(text) > 20:
         return text
-    raise ValueError(f"Ollama returned unusable output: '{text}'")
+    raise ValueError(f"LLM returned unusable output: '{text}'")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -260,49 +230,30 @@ def refine_llm(caption: str, disease_label: str,
                top_diseases: list = None,
                image_path: str = None) -> dict:
     """
-    Generate a structured observational report using Ollama.
+    Generate a structured observational report from the PubMedCLIP findings
+    using the in-process transformers LLM.
 
-    If image_path is given and vision is enabled, a vision LLM reads the
-    actual X-ray (grounded report). Otherwise a text LLM works from the
-    PubMedCLIP findings.
+    `image_path` is accepted for backward compatibility with the pipeline but
+    is not used — the LLM is text-only and is grounded in the VLM findings.
 
     Returns:
         {
             "report"        : str,
-            "backend"       : "ollama-vision" | "ollama",
+            "backend"       : "transformers:<model>",
             "response_time" : float,
         }
     """
     start = time.time()
 
-    if not _ollama_available():
+    if not load_llm():
         raise RuntimeError(
-            f"Ollama is not reachable at {OLLAMA_URL}. "
-            "Start it with `ollama serve` and pull the model "
-            f"(`ollama pull {OLLAMA_VISION_MODEL}`)."
+            f"LLM model '{LLM_MODEL}' failed to load. Check that transformers "
+            "and torch are installed and the model name is correct."
         )
 
-    use_vision = bool(image_path) and ENABLE_VISION
-    model_name = OLLAMA_VISION_MODEL if use_vision else OLLAMA_MODEL
-    backend    = "ollama-vision" if use_vision else "ollama"
-
-    print(f"  [LLM] Generating report with Ollama ({model_name})"
-          f"{' + image' if use_vision else ''}...")
-    try:
-        report = _generate_ollama(caption, disease_label, top_diseases, image_path)
-    except Exception as e:
-        # The vision model can fail on constrained GPUs (e.g. a T4 OOM returns
-        # HTTP 500 from /api/chat). Rather than fail the whole analysis, degrade
-        # gracefully to a text-only report grounded in the PubMedCLIP findings.
-        if use_vision:
-            print(f"  [LLM] Vision generation failed ({e}); "
-                  f"falling back to text-only report...")
-            report  = _generate_ollama(caption, disease_label,
-                                       top_diseases, image_path=None)
-            backend = "ollama-text-fallback"
-        else:
-            raise
-
+    backend = f"transformers:{LLM_MODEL.split('/')[-1]}"
+    print(f"  [LLM] Generating report with {backend}...")
+    report  = _generate(caption, disease_label, top_diseases)
     elapsed = round(time.time() - start, 3)
     print(f"  [LLM] Report generated in {elapsed}s (backend: {backend})")
 
@@ -318,12 +269,10 @@ def refine_llm(caption: str, disease_label: str,
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 60)
-    print("  LLM Report Generation — Ollama only")
-    print(f"  Ollama URL    : {OLLAMA_URL}")
-    print(f"  Text model    : {OLLAMA_MODEL}")
-    print(f"  Vision model  : {OLLAMA_VISION_MODEL}")
-    print(f"  Vision on?    : {ENABLE_VISION}")
-    print(f"  Available     : {_ollama_available()}")
+    print("  LLM Report Generation — in-process transformers")
+    print(f"  Model   : {LLM_MODEL}")
+    print(f"  Device  : {DEVICE}")
+    print(f"  Loaded  : {load_llm()}")
     print("=" * 60)
 
     test_cases = [

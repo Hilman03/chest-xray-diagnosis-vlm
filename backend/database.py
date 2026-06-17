@@ -34,11 +34,12 @@ def store_exists(image_id: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 _mongo_client     = None
 _mongo_collection = None
+_mongo_fs         = None      # GridFS bucket for image bytes
 _mongo_connected  = False
 
 
 def connect_mongodb(uri: str = None) -> bool:
-    global _mongo_client, _mongo_collection, _mongo_connected
+    global _mongo_client, _mongo_collection, _mongo_fs, _mongo_connected
 
     if _mongo_connected:
         return True
@@ -51,6 +52,7 @@ def connect_mongodb(uri: str = None) -> bool:
     try:
         from pymongo import MongoClient
         from pymongo.server_api import ServerApi
+        from gridfs import GridFS
 
         print(f"  [DB] Connecting to MongoDB Atlas...")
         _mongo_client = MongoClient(
@@ -59,7 +61,9 @@ def connect_mongodb(uri: str = None) -> bool:
             serverSelectionTimeoutMS=5000,
         )
         _mongo_client.admin.command("ping")
-        _mongo_collection = _mongo_client["cxr_pacs"]["reports"]
+        _db               = _mongo_client["cxr_pacs"]
+        _mongo_collection = _db["reports"]
+        _mongo_fs         = GridFS(_db)          # persists image files
         _mongo_connected  = True
         print(f"  [DB] MongoDB Atlas connected successfully")
         return True
@@ -68,6 +72,46 @@ def connect_mongodb(uri: str = None) -> bool:
         print(f"  [DB] MongoDB connection failed: {e}")
         _mongo_connected = False
         return False
+
+
+# ─────────────────────────────────────────────────────────────
+# IMAGE FILE PERSISTENCE (GridFS) — so images survive a restart
+# ─────────────────────────────────────────────────────────────
+def gridfs_put(image_id: str, data: bytes, filename: str = None) -> bool:
+    """Store image bytes in GridFS, replacing any previous copy."""
+    if not _mongo_connected or _mongo_fs is None:
+        return False
+    try:
+        for f in _mongo_fs.find({"image_id": image_id}):
+            _mongo_fs.delete(f._id)
+        _mongo_fs.put(data, image_id=image_id, filename=filename or image_id)
+        return True
+    except Exception as e:
+        print(f"  [DB] GridFS put error: {e}")
+        return False
+
+
+def gridfs_get(image_id: str):
+    """Return stored image bytes for image_id, or None."""
+    if not _mongo_connected or _mongo_fs is None:
+        return None
+    try:
+        f = _mongo_fs.find_one({"image_id": image_id})
+        return f.read() if f else None
+    except Exception as e:
+        print(f"  [DB] GridFS get error: {e}")
+        return None
+
+
+def gridfs_delete(image_id: str):
+    """Remove any stored image bytes for image_id."""
+    if not _mongo_connected or _mongo_fs is None:
+        return
+    try:
+        for f in _mongo_fs.find({"image_id": image_id}):
+            _mongo_fs.delete(f._id)
+    except Exception as e:
+        print(f"  [DB] GridFS delete error: {e}")
 
 
 def mongo_save(record: dict) -> bool:
@@ -139,10 +183,11 @@ def get_record(image_id: str):
 
 
 def delete_record(image_id: str):
-    """Remove a record from both in-memory store and MongoDB."""
+    """Remove a record from both in-memory store and MongoDB (incl. image)."""
     _store.pop(image_id, None)
     if _mongo_connected:
         mongo_delete(image_id)
+        gridfs_delete(image_id)
 
 
 def list_records():

@@ -1722,7 +1722,7 @@ if PAGE == "settings":
              "PubMedCLIP",
              "flaviagiammarino/pubmed-clip-vit-base-patch32"),
             ("Report Generator",
-             "LLaMA (Ollama)",
+             "TinyLlama (in-process)",
              "Prompt-engineered structured observation report"),
             ("Input Resolution",
              "224 x 224 RGB",
