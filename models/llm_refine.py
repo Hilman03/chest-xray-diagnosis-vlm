@@ -31,7 +31,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # ─────────────────────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-LLM_MODEL = os.getenv("LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+# Default to Qwen2.5-1.5B-Instruct: still small enough for a T4 but follows the
+# report structure far better than TinyLlama (which hallucinated form fields).
+# Override with the LLM_MODEL env var, e.g. "TinyLlama/TinyLlama-1.1B-Chat-v1.0".
+LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
 
 MAX_NEW_TOKENS = 350
@@ -64,6 +67,61 @@ SYSTEM_MSG = (
 )
 
 
+# Clinical knowledge for each NIH ChestX-ray14 class. This is the "overall
+# information" handed from the VLM findings to the LLM so the report can
+# explain the finding in detail (definition + radiographic appearance +
+# clinical significance) instead of inventing content.
+DISEASE_KNOWLEDGE = {
+    "Atelectasis": "collapse or incomplete expansion of lung tissue; appears as "
+        "increased opacity with volume loss, displacement of fissures and "
+        "elevation of the hemidiaphragm; often from airway obstruction or "
+        "hypoventilation.",
+    "Cardiomegaly": "enlargement of the cardiac silhouette (cardiothoracic ratio "
+        ">0.5 on a PA film); suggests underlying cardiac disease such as heart "
+        "failure, valvular disease or cardiomyopathy.",
+    "Consolidation": "alveolar air replaced by fluid, pus or cells, producing a "
+        "dense homogeneous opacity, often with air bronchograms; typical of "
+        "pneumonia, aspiration or pulmonary haemorrhage.",
+    "Edema": "fluid accumulation in the pulmonary interstitium and alveoli; shows "
+        "bilateral perihilar haziness, Kerley B lines and vascular redistribution; "
+        "commonly cardiogenic (left heart failure) or from fluid overload.",
+    "Effusion": "fluid in the pleural space; appears as blunting of the "
+        "costophrenic angle and a meniscus, with larger collections opacifying "
+        "the hemithorax; causes include heart failure, infection and malignancy.",
+    "Emphysema": "permanent enlargement and destruction of distal air spaces; "
+        "hyperinflated lucent lungs, flattened diaphragms and a narrow cardiac "
+        "silhouette; strongly associated with smoking and COPD.",
+    "Fibrosis": "scarring and thickening of lung interstitium; reticular opacities, "
+        "volume loss and architectural distortion, often basal and peripheral; "
+        "seen in interstitial lung disease.",
+    "Hernia": "protrusion of abdominal contents (commonly stomach) through the "
+        "diaphragm into the thorax; may show a retrocardiac air-fluid level.",
+    "Infiltration": "ill-defined patchy or hazy opacity from cells or fluid in the "
+        "lung; a nonspecific sign that can reflect infection, inflammation or "
+        "oedema.",
+    "Mass": "a focal opacity larger than 3 cm with defined margins; raises concern "
+        "for neoplasm and warrants further characterisation.",
+    "Nodule": "a rounded focal opacity 3 cm or smaller; may be benign (granuloma) "
+        "or malignant and usually needs follow-up or comparison with priors.",
+    "Pleural_Thickening": "fibrotic thickening of the pleural surface, sometimes "
+        "with calcification; from prior infection, asbestos exposure or "
+        "haemorrhage.",
+    "Pneumonia": "infection of lung parenchyma producing consolidation, air "
+        "bronchograms and patchy or lobar opacity; correlate with fever, cough "
+        "and raised inflammatory markers.",
+    "Pneumothorax": "air in the pleural space causing lung collapse; a visible "
+        "visceral pleural line with absent lung markings peripherally; a tension "
+        "pneumothorax is a medical emergency.",
+    "No Finding": "no significant radiographic abnormality identified; clear lung "
+        "fields, normal cardiomediastinal contour and no effusion.",
+}
+
+
+def _disease_info(name: str) -> str:
+    """Clinical description for a disease label (empty if unknown)."""
+    return DISEASE_KNOWLEDGE.get(name, "")
+
+
 def _confidence_tier(score: float) -> str:
     """Map a probability to calibrated radiology language."""
     if score >= 0.60:
@@ -85,40 +143,46 @@ def _build_prompt(caption: str, disease_label: str,
                   top_diseases: list = None) -> str:
     """User message: hand the model the exact facts and a fixed structure."""
     if top_diseases:
+        # Pass the full set of findings WITH their clinical descriptions, so the
+        # LLM has real medical content to explain rather than inventing it.
         findings_str = "\n".join(
-            f"  - {d}: {s*100:.1f}% confidence ({_confidence_tier(s)})"
+            f"  - {d}: {s*100:.1f}% confidence ({_confidence_tier(s)}) — "
+            f"{_disease_info(d)}"
             for d, s in top_diseases[:3]
         )
     else:
-        findings_str = f"  - {disease_label}"
+        findings_str = f"  - {disease_label} — {_disease_info(disease_label)}"
 
-    findings_clause = (
-        f"2. Findings: describe the radiographic appearance associated with "
-        f"{disease_label}, using wording calibrated to its confidence "
-        f"({_top_score(top_diseases)}). Mention the other listed findings "
-        f"only as lower-confidence considerations.\n"
-    )
+    primary_info = _disease_info(disease_label) or "the predicted condition"
 
     return (
-        f"PubMedCLIP image analysis findings:\n"
+        f"PubMedCLIP image analysis findings (with clinical background):\n"
         f"{findings_str}\n"
-        f"Primary finding: {disease_label}\n"
+        f"Primary finding: {disease_label} ({_top_score(top_diseases)})\n"
         f"Reference description: \"{caption}\"\n\n"
-        f"Write a short observational report (3 short paragraphs, ~120 words "
-        f"total, prose not bullet points) using EXACTLY this structure and "
-        f"these three numbered headings:\n"
+        f"Clinical background for the primary finding ({disease_label}):\n"
+        f"  {primary_info}\n\n"
+        f"Write a detailed observational report (3 paragraphs) using EXACTLY "
+        f"this structure and these three numbered headings:\n"
         f"1. Technique: state it is a frontal chest radiograph of adequate "
         f"diagnostic quality.\n"
-        f"{findings_clause}"
-        f"3. Impression: one sentence summarising {disease_label} as the "
-        f"AI-predicted primary finding, noting this is an AI observation "
-        f"requiring radiologist confirmation.\n\n"
+        f"2. Findings: explain {disease_label} in detail — what the condition "
+        f"is, its typical radiographic appearance on a chest X-ray, and its "
+        f"clinical significance — using the clinical background above and "
+        f"wording calibrated to the {_confidence_tier(top_diseases[0][1]) if top_diseases else 'stated'} "
+        f"confidence. Then briefly note the other listed findings as "
+        f"lower-confidence alternative considerations.\n"
+        f"3. Impression: two or three sentences summarising {disease_label} as "
+        f"the AI-predicted primary finding, its likely significance, and a note "
+        f"that this is an AI observation requiring radiologist confirmation.\n\n"
         f"Rules:\n"
-        f"- Output ONLY the report itself about this chest X-ray.\n"
-        f"- Do NOT add any preamble, introduction, sign-off, or markdown "
-        f"formatting (no \"Here is a report\", no \"based on the findings\", "
-        f"no notes about the AI model, no asterisks or headers).\n"
-        f"- Do NOT state any finding not supported by the data above."
+        f"- This is a chest X-ray report ONLY. Do NOT output any form, header "
+        f"block, patient demographics, names, dates, signatures, certification "
+        f"or contact fields.\n"
+        f"- Write in clinical prose. No markdown, asterisks, bullet symbols, or "
+        f"preamble like \"Here is a report\".\n"
+        f"- Do NOT invent measurements, laterality or findings not supported "
+        f"by the data above."
     )
 
 
@@ -131,6 +195,23 @@ _FILLER_PREFIXES = (
     "based on", "the following", "below is", "i have", "i've", "as requested",
     "this report", "in summary", "note:", "disclaimer", "please note",
 )
+
+# Hallucinated form / demographic / header content that small models sometimes
+# emit (e.g. a fake certification form). Any line containing one of these is
+# dropped — none belong in a radiograph observation report.
+_FORM_JUNK = (
+    "patient name", "name:", "date of birth", "dob:", "gender:", "sex:",
+    "height:", "weight:", "eye color", "hair color", "skin tone",
+    "marital status", "race:", "ethnicity:", "occupation", "industry:",
+    "zip code", "city:", "address:", "phone", "email", "signature",
+    "board certification", "certification:", "date and location",
+    "date:", "[insert", "_____",
+)
+
+
+def _is_form_junk(line: str) -> bool:
+    low = line.lower()
+    return any(tok in low for tok in _FORM_JUNK)
 
 
 def _strip_markdown(line: str) -> str:
@@ -153,6 +234,8 @@ def _clean_report(text: str) -> str:
             continue
         low = ln.lower()
         if any(low.startswith(p) for p in _FILLER_PREFIXES):
+            continue
+        if _is_form_junk(ln):          # drop hallucinated form/demographic lines
             continue
         kept.append(ln)
     cleaned = "\n".join(kept).strip()
