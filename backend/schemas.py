@@ -16,12 +16,6 @@ class UploadResponse(BaseModel):
     is_dicom        : bool = False
 
 
-class DiseaseScore(BaseModel):
-    disease : str
-    score   : float
-    percent : str
-
-
 class AnalyzeResponse(BaseModel):
     image_id        : str
     filename        : str
@@ -33,6 +27,7 @@ class AnalyzeResponse(BaseModel):
     llm_backend     : str
     vlm_time        : float
     llm_time        : float
+    db_time         : float = 0.0
     total_time      : float
     analyzed_at     : str
 
@@ -48,9 +43,12 @@ class ReportResponse(BaseModel):
     llm_backend     : Optional[str] = ""
     vlm_time        : Optional[float] = 0.0
     llm_time        : Optional[float] = 0.0
+    db_time         : Optional[float] = 0.0
     total_time      : Optional[float] = 0.0
     uploaded_at     : Optional[str] = ""
     analyzed_at     : Optional[str] = ""
+    report_exported : Optional[bool] = False
+    exported_at     : Optional[str] = ""
     is_dicom        : Optional[bool] = False
     dicom_metadata  : Optional[dict] = {}
 

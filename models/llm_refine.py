@@ -53,31 +53,46 @@ GEN_REPEAT_PEN  = 1.3
 # PROMPT — constrained, fact-grounded, no invention
 # ─────────────────────────────────────────────────────────────
 SYSTEM_MSG = (
-    "You are a radiologist drafting a factual chest X-ray observation report "
-    "from an AI image-analysis result. You did NOT see the image yourself — "
-    "you only have the PubMedCLIP findings below. "
-    "Report ONLY those findings and their confidence. "
-    "Do NOT invent measurements, locations, patient history, comparisons, or "
-    "treatment advice. Be concise, neutral, and stay strictly on-topic."
+    "You are a board-certified radiologist drafting a factual chest X-ray "
+    "observation report from an AI image-analysis result. You did NOT see the "
+    "image yourself — your ONLY source is the PubMedCLIP findings below. "
+    "Ground every statement in those findings and calibrate your wording to "
+    "their confidence: high confidence reads as a clear finding, moderate as "
+    "'suggested'/'possible', low as 'cannot be excluded'. "
+    "Do NOT invent measurements, laterality, locations, patient history, "
+    "comparisons with priors, or treatment advice. Use professional "
+    "radiology register, be concise and neutral, and stay strictly on-topic."
 )
 
 # Used only on the multimodal path, where the model can actually see the image.
 SYSTEM_MSG_VISION = (
-    "You are a radiologist reading a chest X-ray image that is provided to you. "
-    "Describe ONLY what is visible in this chest radiograph. "
-    "A separate AI tool (PubMedCLIP) has given candidate findings with "
-    "confidence scores — use them as a second opinion, and note where the "
-    "image agrees or disagrees with them. "
+    "You are a board-certified radiologist reading the chest X-ray image "
+    "provided to you. Describe ONLY what is genuinely visible in this "
+    "radiograph. A separate AI tool (PubMedCLIP) has supplied candidate "
+    "findings with confidence scores — treat these as a second opinion: state "
+    "explicitly where the image agrees or disagrees with them rather than "
+    "repeating them uncritically. Calibrate wording to the visible evidence. "
     "Do NOT invent patient history, prior studies, exact measurements, or "
-    "treatment advice. Be concise, neutral, and stay strictly on-topic to "
-    "this chest X-ray."
+    "treatment advice, and do NOT claim to see findings that are not there. "
+    "Use professional radiology register, be concise and neutral, and stay "
+    "strictly on-topic to this chest X-ray."
 )
 
 
+def _confidence_tier(score: float) -> str:
+    """Map a probability to calibrated radiology language."""
+    if score >= 0.60:
+        return "high"
+    if score >= 0.30:
+        return "moderate"
+    return "low"
+
+
 def _top_score(top_diseases: list) -> str:
-    """Format the top finding's confidence, e.g. '87% confidence'."""
+    """Format the top finding's confidence, e.g. '87% confidence (high)'."""
     if top_diseases:
-        return f"{top_diseases[0][1]*100:.0f}% confidence"
+        score = top_diseases[0][1]
+        return f"{score*100:.0f}% confidence ({_confidence_tier(score)})"
     return "unknown confidence"
 
 
@@ -86,7 +101,8 @@ def _build_prompt(caption: str, disease_label: str,
     """User message: hand the model the exact facts and a fixed structure."""
     if top_diseases:
         findings_str = "\n".join(
-            f"  - {d}: {s*100:.1f}% confidence" for d, s in top_diseases[:3]
+            f"  - {d}: {s*100:.1f}% confidence ({_confidence_tier(s)})"
+            for d, s in top_diseases[:3]
         )
     else:
         findings_str = f"  - {disease_label}"
@@ -97,14 +113,15 @@ def _build_prompt(caption: str, disease_label: str,
             f"focusing on the region relevant to {disease_label}. State whether "
             f"the image supports the PubMedCLIP prediction of {disease_label} "
             f"({_top_score(top_diseases)}), and mention the other listed "
-            f"findings only as lower-confidence considerations.\n"
+            f"findings only as lower-confidence considerations. Note relevant "
+            f"normal/clear areas where appropriate.\n"
         )
     else:
         findings_clause = (
             f"2. Findings: describe the radiographic appearance associated with "
-            f"{disease_label}, and note the supporting confidence score. "
-            f"Mention the other listed findings only as lower-confidence "
-            f"considerations.\n"
+            f"{disease_label}, using wording calibrated to its confidence "
+            f"({_top_score(top_diseases)}). Mention the other listed findings "
+            f"only as lower-confidence considerations.\n"
         )
 
     return (
@@ -112,17 +129,21 @@ def _build_prompt(caption: str, disease_label: str,
         f"{findings_str}\n"
         f"Primary finding: {disease_label}\n"
         f"Reference description: \"{caption}\"\n\n"
-        f"Write a short observational report using EXACTLY this structure:\n"
+        f"Write a short observational report (3 short paragraphs, ~120 words "
+        f"total, prose not bullet points) using EXACTLY this structure and "
+        f"these three numbered headings:\n"
         f"1. Technique: state it is a frontal chest radiograph of adequate "
         f"diagnostic quality.\n"
         f"{findings_clause}"
         f"3. Impression: one sentence summarising {disease_label} as the "
         f"AI-predicted primary finding, noting this is an AI observation "
         f"requiring radiologist confirmation.\n\n"
-        f"Output ONLY the report itself about this chest X-ray. "
-        f"Do NOT add any preamble, introduction, sign-off, or sentences "
-        f"that are not about the radiograph (no \"Here is a report\", "
-        f"no \"based on the findings\", no notes about the AI model)."
+        f"Rules:\n"
+        f"- Output ONLY the report itself about this chest X-ray.\n"
+        f"- Do NOT add any preamble, introduction, sign-off, or markdown "
+        f"formatting (no \"Here is a report\", no \"based on the findings\", "
+        f"no notes about the AI model, no asterisks or headers).\n"
+        f"- Do NOT state any finding not supported by the data above."
     )
 
 
@@ -137,11 +158,22 @@ _FILLER_PREFIXES = (
 )
 
 
+def _strip_markdown(line: str) -> str:
+    """Remove leaked markdown markers (bold/italic, headers, bullets)."""
+    line = line.replace("**", "").replace("__", "")
+    # Leading header (#) or bullet (*, -, •) markers, kept defensively because
+    # the prompt forbids markdown but small models occasionally emit it.
+    return line.lstrip("#*-• \t")
+
+
 def _clean_report(text: str) -> str:
     """Strip preamble/closing filler so only X-ray observation lines remain."""
     lines = [ln.strip() for ln in text.splitlines()]
     kept = []
     for ln in lines:
+        if not ln:
+            continue
+        ln = _strip_markdown(ln)
         if not ln:
             continue
         low = ln.lower()

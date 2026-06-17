@@ -147,7 +147,7 @@ def predict_diseases(image_path: str) -> dict:
 
         # Map disease names to scores
         all_scores = {
-            disease: float(round(float(prob), 4))
+            disease: round(float(prob), 4)
             for disease, prob in zip(disease_names, probs)
         }
 
@@ -184,12 +184,6 @@ def predict_diseases(image_path: str) -> dict:
 # ─────────────────────────────────────────────────────────────
 # MAIN INFERENCE FUNCTIONS
 # ─────────────────────────────────────────────────────────────
-def infer_vlm(image_path: str) -> str:
-    """Returns disease description string."""
-    result = infer_vlm_with_label(image_path)
-    return result["caption"]
-
-
 def infer_vlm_with_label(image_path: str) -> dict:
     """
     Full PubMedCLIP inference on a CXR image.
@@ -235,10 +229,6 @@ def infer_vlm_with_label(image_path: str) -> dict:
         "response_time" : elapsed,
         "success"       : result["success"],
     }
-
-
-def infer_vlm_timed(image_path: str) -> dict:
-    return infer_vlm_with_label(image_path)
 
 
 # ─────────────────────────────────────────────────────────────

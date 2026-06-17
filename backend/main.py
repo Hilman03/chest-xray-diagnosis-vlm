@@ -37,6 +37,15 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
+# Make stdout/stderr UTF-8 safe so console logging of Unicode (e.g. the "→"
+# in route docs/log lines) never raises on a legacy Windows code page (cp1252),
+# which would otherwise surface as a misleading "Upload error".
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
@@ -301,6 +310,18 @@ async def startup_event():
     except Exception as e:
         print(f"  [Startup] LLM check skipped: {e}")
 
+    # Resource-usage snapshot — verifies models are resident in memory and
+    # helps monitor footprint. Skipped silently if psutil is unavailable.
+    try:
+        import psutil
+        proc = psutil.Process(os.getpid())
+        rss  = proc.memory_info().rss / (1024 * 1024)
+        print(f"  [Startup] Process memory (RSS): {rss:.0f} MB")
+        print(f"  [Startup] System memory used  : "
+              f"{psutil.virtual_memory().percent:.0f}%")
+    except Exception:
+        pass
+
     print("  [Startup] API ready!")
     print("=" * 55)
 
@@ -397,7 +418,8 @@ async def analyze_image(image_id: str):
 
     Pipeline:
         1. PubMedCLIP (VLM) — predicts disease from image
-        2. Template LLM — generates structured observational report
+        2. Ollama LLM — generates structured observational report
+           (prompt-engineered, grounded in the PubMedCLIP findings)
         3. Stores result in MongoDB Atlas
 
     Returns descriptive and interpretable textual output
@@ -448,10 +470,17 @@ async def analyze_image(image_id: str):
             "total_time"    : result["total_time"],
             "analyzed_at"   : analyzed_at,
         })
+
+        # Measure database storage time as a performance metric, then persist
+        # it (a second save is negligible and keeps db_time in the record).
+        db_start = time.time()
+        save_record(image_id, record)
+        db_time = round(time.time() - db_start, 3)
+        record["db_time"] = db_time
         save_record(image_id, record)
 
         print(f"  [Analyze] Done — {result['disease_label']} "
-              f"in {result['total_time']}s")
+              f"in {result['total_time']}s (db {db_time}s)")
 
         return AnalyzeResponse(
             image_id      = image_id,
@@ -464,6 +493,7 @@ async def analyze_image(image_id: str):
             llm_backend   = result["llm_backend"],
             vlm_time      = result["vlm_time"],
             llm_time      = result["llm_time"],
+            db_time       = db_time,
             total_time    = result["total_time"],
             analyzed_at   = analyzed_at,
         )
@@ -508,14 +538,19 @@ async def list_all_reports():
         "total"  : len(records),
         "reports": [
             {
-                "image_id"     : r.get("image_id", ""),
-                "filename"     : r.get("filename", ""),
-                "status"       : r.get("status", ""),
-                "disease_label": r.get("disease_label", ""),
-                "is_dicom"     : r.get("is_dicom", False),
-                "total_time"   : r.get("total_time", 0),
-                "uploaded_at"  : r.get("uploaded_at", ""),
-                "analyzed_at"  : r.get("analyzed_at", ""),
+                "image_id"       : r.get("image_id", ""),
+                "filename"       : r.get("filename", ""),
+                "status"         : r.get("status", ""),
+                "disease_label"  : r.get("disease_label", ""),
+                "is_dicom"       : r.get("is_dicom", False),
+                "vlm_time"       : r.get("vlm_time", 0),
+                "llm_time"       : r.get("llm_time", 0),
+                "db_time"        : r.get("db_time", 0),
+                "total_time"     : r.get("total_time", 0),
+                "uploaded_at"    : r.get("uploaded_at", ""),
+                "analyzed_at"    : r.get("analyzed_at", ""),
+                "report_exported": r.get("report_exported", False),
+                "exported_at"    : r.get("exported_at", ""),
             }
             for r in records
         ]
@@ -567,6 +602,11 @@ async def export_pdf(image_id: str):
 
     pdf_bytes = generate_pdf(record)
     filename  = f"CXR_Report_{record['filename'].split('.')[0]}.pdf"
+
+    # Audit trail: record that the report was exported and when.
+    record["report_exported"] = True
+    record["exported_at"]     = datetime.now().isoformat()
+    save_record(image_id, record)
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),

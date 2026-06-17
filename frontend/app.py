@@ -423,10 +423,6 @@ if st.session_state.page == "cover":
     <style>
       @keyframes lpFade {{ from {{ opacity:0; transform:translateY(14px); }}
                           to {{ opacity:1; transform:translateY(0); }} }}
-      @keyframes lpPulse {{ 0%,100% {{ box-shadow:0 0 22px rgba(77,142,240,0.18); }}
-                            50% {{ box-shadow:0 0 46px rgba(77,142,240,0.42); }} }}
-      @keyframes lpSweep {{ 0% {{ transform:translateY(-110%); }}
-                            100% {{ transform:translateY(210%); }} }}
       .lp-wrap {{ max-width:1080px; margin:18px auto 0;
                   animation:lpFade 0.6s ease both; }}
       .lp-rule {{ height:1px; background:linear-gradient(90deg,
@@ -455,20 +451,6 @@ if st.session_state.page == "cover":
                  background:rgba(77,142,240,0.12); border:1px solid #2f4a6e;
                  color:#74aaff; font-family:'JetBrains Mono'; font-weight:600;
                  font-size:15px; }}
-      .lp-frame {{ position:relative; background:
-                   radial-gradient(120% 120% at 30% 20%,#202734 0%,#171b23 100%);
-                   border:1px solid #2b3240; border-radius:14px; height:300px;
-                   overflow:hidden; }}
-      .lp-frame::after {{ content:""; position:absolute; left:0; right:0; height:60px;
-                   background:linear-gradient(180deg,transparent,
-                   rgba(91,155,240,0.10),transparent);
-                   animation:lpSweep 3.6s linear infinite; pointer-events:none; }}
-      .lp-corner {{ position:absolute; width:22px; height:22px;
-                    border-color:#3f6aa5; }}
-      .lp-pulse {{ width:62px; height:62px; border-radius:50%;
-                   background:radial-gradient(circle,#2a3550,#1c2330);
-                   border:1px solid #34507a;
-                   animation:lpPulse 2.6s ease-in-out infinite; }}
     </style>
 
     <div class="lp-wrap">
@@ -489,56 +471,24 @@ if st.session_state.page == "cover":
       </div>
       <div class="lp-rule"></div>
 
-      <div style="display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px;
-                  align-items:center; padding:54px 0 40px;">
-        <div>
-          <div class="lp-kicker">Chest Radiograph Analysis Workstation</div>
-          <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
-          <div class="lp-sub">
-            A PACS-style workstation that pairs PubMedCLIP vision analysis
-            with Ollama report generation — upload, review, and export
-            structured radiograph observations in one place.
-          </div>
-          <div style="display:inline-flex; align-items:center; gap:8px;
-                      margin-top:22px; background:#1c2230; border:1px solid #2b3240;
-                      padding:7px 14px; border-radius:20px;">
-            <span style="width:8px; height:8px; border-radius:50%;
-                         background:{_stat_col};
-                         box-shadow:0 0 8px {_stat_col};"></span>
-            <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
-                         color:{_stat_col};">{_stat_txt}</span>
-            <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
-                         color:#48515f;">·&nbsp; {cnt} studies in archive</span>
-          </div>
+      <div style="text-align:center; padding:54px 0 40px;">
+        <div class="lp-kicker">Chest Radiograph Analysis Workstation</div>
+        <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
+        <div class="lp-sub" style="margin-left:auto; margin-right:auto;">
+          A PACS-style workstation that pairs PubMedCLIP vision analysis
+          with Ollama report generation — upload, review, and export
+          structured radiograph observations in one place.
         </div>
-
-        <div class="lp-frame">
-          <div class="lp-corner" style="top:12px; left:12px;
-               border-top:2px solid #3f6aa5; border-left:2px solid #3f6aa5;"></div>
-          <div class="lp-corner" style="top:12px; right:12px;
-               border-top:2px solid #3f6aa5; border-right:2px solid #3f6aa5;"></div>
-          <div class="lp-corner" style="bottom:12px; left:12px;
-               border-bottom:2px solid #3f6aa5; border-left:2px solid #3f6aa5;"></div>
-          <div class="lp-corner" style="bottom:12px; right:12px;
-               border-bottom:2px solid #3f6aa5; border-right:2px solid #3f6aa5;"></div>
-          <div style="position:absolute; top:16px; left:18px;
-                      font-family:'JetBrains Mono',monospace; font-size:10px;
-                      color:#3f6aa5; line-height:1.7;">
-            PA · UPRIGHT<br>224 × 224<br>AI-ASSIST</div>
-          <div style="position:absolute; inset:0; display:flex; align-items:center;
-                      justify-content:center; flex-direction:column; gap:14px;">
-            <div style="width:96px; height:96px; border-radius:50%;
-                        border:1px solid #2f3a4c; display:flex; align-items:center;
-                        justify-content:center;">
-              <div class="lp-pulse"></div>
-            </div>
-            <div style="font-family:'JetBrains Mono',monospace; font-size:10px;
-                        color:#46546b; letter-spacing:1px;">THORAX · FRONTAL</div>
-          </div>
-          <div style="position:absolute; bottom:16px; right:18px;
-                      font-family:'JetBrains Mono',monospace; font-size:10px;
-                      color:#3f6aa5; text-align:right; line-height:1.7;">
-            PubMedCLIP<br>Ollama</div>
+        <div style="display:inline-flex; align-items:center; gap:8px;
+                    margin-top:22px; background:#1c2230; border:1px solid #2b3240;
+                    padding:7px 14px; border-radius:20px;">
+          <span style="width:8px; height:8px; border-radius:50%;
+                       background:{_stat_col};
+                       box-shadow:0 0 8px {_stat_col};"></span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
+                       color:{_stat_col};">{_stat_txt}</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:12px;
+                       color:#48515f;">·&nbsp; {cnt} studies in archive</span>
         </div>
       </div>
       <div class="lp-rule"></div>
@@ -624,13 +574,6 @@ if st.session_state.page == "cover":
             st.session_state.page = "viewer"
             st.rerun()
 
-    st.markdown("""
-    <div style="max-width:1080px; margin:20px auto 0; text-align:center;
-                font-family:'Inter',sans-serif; font-size:11px; color:#414a58;">
-        For demonstration and educational purposes only — not a certified
-        medical device and not intended for clinical diagnosis.
-    </div>
-    """, unsafe_allow_html=True)
     st.stop()
 
 # ── Top navigation bar ────────────────────────────────────────
@@ -696,10 +639,10 @@ if not ok:
     )
 
 # ── Page registry ─────────────────────────────────────────────
-PAGES = ["worklist", "viewer", "upload", "history", "settings"]
+PAGES = ["worklist", "viewer", "upload", "history", "performance", "settings"]
 PAGE_LABELS = {
     "worklist": "Worklist", "viewer": "Viewer", "upload": "Upload",
-    "history": "History", "settings": "Settings",
+    "history": "History", "performance": "Performance", "settings": "Settings",
 }
 
 # ── Page navigation bar ───────────────────────────────────────
@@ -1069,7 +1012,7 @@ if PAGE == "viewer":
                 """, unsafe_allow_html=True)
                 if st.button("Run AI Analysis",
                              use_container_width=True, key="anb"):
-                    with cxr_spinner("Running PubMedCLIP analysis..."):
+                    with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
                         rx = req(f"/analyze/{sid}",
                                  method="POST", t=120, no_cache=True)
                     if rx:
@@ -1081,6 +1024,26 @@ if PAGE == "viewer":
                             "Check API connection and try again."
                         )
             else:
+                # ── Study Information panel — single summary of the study,
+                #    visible throughout the analyzed-study workflow ─────────
+                _top      = rep.get("top_diseases") or []
+                _conf     = f"{_top[0][1]*100:.0f}%" if _top else "—"
+                _exported = rep.get("report_exported")
+                _exp_txt  = "Exported" if _exported else "Not exported"
+                _exp_col  = "#72c472" if _exported else "#8a93a6"
+                section("Study Information")
+                data_row("Study ID",    (sid or "")[:18] + "...")
+                data_row("Filename",    fn)
+                data_row("Status",      sta.upper(), color="#72c472")
+                data_row("Uploaded",    (rep.get("uploaded_at") or "—")[:16])
+                data_row("Analyzed",    (rep.get("analyzed_at") or "—")[:16])
+                data_row("Predicted",   dis, color="#72c472")
+                data_row("Confidence",  _conf, color=uc)
+                data_row("Report time", f"{rep.get('total_time',0)}s")
+                data_row("Export",      _exp_txt, color=_exp_col, border=False)
+                st.markdown("<div style='height:14px'></div>",
+                            unsafe_allow_html=True)
+
                 # DICOM patient info
                 dm = rep.get("dicom_metadata",{})
                 if dm:
@@ -1121,19 +1084,32 @@ if PAGE == "viewer":
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Confidence scores
-                section("Confidence Scores")
-                for d, s in rep.get("top_diseases",[]):
+                # Confidence scores — rank 1 is the primary prediction, the
+                # rest are alternative possibilities (PubMedCLIP Top-3).
+                section("Confidence Scores — Top 3 Predictions")
+                for _rank, (d, s) in enumerate(rep.get("top_diseases",[])):
                     p    = int(s * 100)
                     col  = "#72c472" if p>50 else ("#d4aa50" if p>20 else "#e07878")
                     info = DISEASE_INFO.get(d,"")
+                    if _rank == 0:
+                        tag_txt, tag_col, tag_bg = "PRIMARY", "#72c472", "#162316"
+                    else:
+                        tag_txt, tag_col, tag_bg = "ALTERNATIVE", "#8a93a6", "#20242e"
                     st.markdown(f"""
                     <div style="margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between;
-                                    margin-bottom:4px;">
+                                    align-items:center; margin-bottom:4px;">
                             <span style="font-family:'Inter',sans-serif;
                                          font-size:13px; font-weight:500;
-                                         color:#c8d0e0;">{d}</span>
+                                         color:#c8d0e0;">
+                                {d}
+                                <span style="font-family:'Inter',sans-serif;
+                                             font-size:9px; font-weight:600;
+                                             color:{tag_col}; background:{tag_bg};
+                                             border:1px solid #2e3442; padding:1px 6px;
+                                             border-radius:8px; margin-left:6px;
+                                             letter-spacing:0.5px;">{tag_txt}</span>
+                            </span>
                             <span style="font-family:'JetBrains Mono',monospace;
                                          font-size:12px; font-weight:600;
                                          color:{col};">{p}%</span>
@@ -1181,6 +1157,12 @@ if PAGE == "viewer":
                         with cxr_spinner("Generating PDF..."):
                             pr = req(f"/export/{sid}", t=30)
                         if pr:
+                            # Backend now records the export in the audit trail;
+                            # mirror it locally so the Study Information panel
+                            # reflects "Exported" on the next rerun.
+                            if isinstance(st.session_state.report, dict):
+                                st.session_state.report["report_exported"] = True
+                            fetch_reports.clear()
                             st.download_button(
                                 "Download PDF",
                                 data=pr.content,
@@ -1197,7 +1179,7 @@ if PAGE == "viewer":
                 with ac2:
                     if st.button("Analysis",
                                  use_container_width=True, key="reanalyze"):
-                        with cxr_spinner("Running PubMedCLIP analysis..."):
+                        with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
                             rx = req(f"/analyze/{sid}",
                                      method="POST", t=120, no_cache=True)
                         if rx:
@@ -1275,8 +1257,8 @@ if PAGE == "upload":
                 for idx, up in enumerate(ups):
                     base = int(idx / n * 100)
                     prog.progress(
-                        min(base + 5, 99),
-                        text=f"[{idx+1}/{n}] Uploading {up.name}..."
+                        min(base + 4, 99),
+                        text=f"[{idx+1}/{n}] Image Upload + Preprocessing — {up.name}"
                     )
                     ru = req(
                         "/upload", method="POST", t=30, no_cache=True,
@@ -1289,8 +1271,9 @@ if PAGE == "upload":
 
                     uid = ru.json().get("image_id")
                     prog.progress(
-                        min(base + 15, 99),
-                        text=f"[{idx+1}/{n}] Analyzing {up.name}..."
+                        min(base + 12, 99),
+                        text=f"[{idx+1}/{n}] PubMedCLIP Analysis → LLaMA Report → "
+                             f"DB Storage — {up.name}"
                     )
                     ra = req(f"/analyze/{uid}", method="POST",
                              t=180, no_cache=True)
@@ -1308,7 +1291,7 @@ if PAGE == "upload":
                         st.session_state.report   = results[0][1]
                     add_recent(uid)
 
-                prog.progress(100, text="Complete")
+                prog.progress(100, text="Report Generation Completed")
 
                 # No errors → jump straight to the viewer (first study loaded),
                 # so the user doesn't have to open studies one by one.
@@ -1412,12 +1395,43 @@ if PAGE == "history":
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Search by Study ID / filename + filter by disease ─────
+    hs1, hs2 = st.columns([2, 1])
+    with hs1:
+        hist_q = st.text_input(
+            "Search history",
+            placeholder="Search by Study ID or filename...",
+            label_visibility="collapsed",
+            key="hist_q",
+        )
+    with hs2:
+        _diseases = sorted({r.get("disease_label") for r in rp3
+                            if r.get("disease_label")})
+        disease_filter = st.selectbox(
+            "Filter by finding",
+            ["All findings"] + _diseases,
+            label_visibility="collapsed",
+            key="hist_disease",
+        )
+
+    q = (hist_q or "").lower().strip()
+    rp3 = [
+        r for r in rp3
+        if (not q
+            or q in (r.get("image_id") or "").lower()
+            or q in (r.get("filename") or "").lower())
+        and (disease_filter == "All findings"
+             or r.get("disease_label") == disease_filter)
+    ]
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
     if not rp3:
         st.markdown("""
         <div style="background:#232830; border:1px solid #2e3442;
                     border-radius:8px; padding:32px; text-align:center;
                     color:#4a5368; font-size:14px;">
-            No history. Upload and analyze an image to begin.
+            No studies match the current search or filter.
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -1500,6 +1514,103 @@ if PAGE == "history":
 
 
 # ══════════════════════════════════════════════════════════
+# PERFORMANCE  — processing-metrics dashboard
+# ══════════════════════════════════════════════════════════
+if PAGE == "performance":
+    rjp = fetch_reports(st.session_state.api)
+    # Only analyzed studies carry timing metrics.
+    # /reports returns records oldest → newest, so the trend already reads
+    # left-to-right chronologically.
+    studies = [r for r in rjp.get("reports", [])
+               if r.get("status") == "analyzed"]
+
+    if not studies:
+        st.markdown("""
+        <div style="background:#232830; border:1px solid #2e3442;
+                    border-radius:8px; padding:32px; text-align:center;
+                    color:#4a5368; font-size:14px;">
+            No analyzed studies yet. Analyze an image to collect metrics.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        def _vals(key):
+            return [float(r.get(key, 0) or 0) for r in studies]
+
+        totals = _vals("total_time")
+        vlms   = _vals("vlm_time")
+        llms   = _vals("llm_time")
+        dbs    = _vals("db_time")
+        n      = len(studies)
+
+        def _avg(v):
+            return sum(v) / len(v) if v else 0.0
+
+        # ── Headline metrics ──────────────────────────────────
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Studies",       n)
+        m2.metric("Avg Total",     f"{_avg(totals):.1f}s")
+        m3.metric("Fastest Total", f"{min(totals):.1f}s")
+        m4.metric("Slowest Total", f"{max(totals):.1f}s")
+
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+        # ── Stage averages ────────────────────────────────────
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Avg PubMedCLIP (VLM)", f"{_avg(vlms):.1f}s")
+        s2.metric("Avg LLaMA (LLM)",      f"{_avg(llms):.1f}s")
+        s3.metric("Avg DB Storage",       f"{_avg(dbs):.2f}s")
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+        # ── Trend chart ───────────────────────────────────────
+        section("Processing-Time Trend (per study, chronological)")
+        st.line_chart(
+            {"Total (s)": totals, "VLM (s)": vlms, "LLM (s)": llms},
+            height=260,
+        )
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # ── Per-study table ───────────────────────────────────
+        section("Per-Study Metrics")
+        st.markdown("""
+        <div style="display:grid;
+                    grid-template-columns:32px 1fr 130px 72px 72px 64px 72px 80px;
+                    background:#232830; border:1px solid #2e3442;
+                    border-bottom:2px solid #363d4e; padding:8px 12px;
+                    font-family:'Inter',sans-serif; font-size:11px; font-weight:600;
+                    color:#6a7385; text-transform:uppercase; letter-spacing:0.6px;
+                    gap:6px;">
+            <div>#</div><div>Filename</div><div>Finding</div><div>VLM</div>
+            <div>LLM</div><div>DB</div><div>Total</div><div>Exported</div>
+        </div>
+        """, unsafe_allow_html=True)
+        for i, r in enumerate(studies, 1):
+            exp_txt = "Yes" if r.get("report_exported") else "—"
+            exp_col = "#72c472" if r.get("report_exported") else "#4a5368"
+            st.markdown(f"""
+            <div style="display:grid;
+                        grid-template-columns:32px 1fr 130px 72px 72px 64px 72px 80px;
+                        background:#1a2030; border:1px solid #222830; border-top:none;
+                        padding:8px 12px; align-items:center; gap:6px;
+                        font-family:'JetBrains Mono',monospace; font-size:12px;
+                        color:#c8d0e0;">
+                <div style="color:#4a5368;">{i:02d}</div>
+                <div style="overflow:hidden; text-overflow:ellipsis;
+                            white-space:nowrap; font-family:'Inter',sans-serif;"
+                     title="{r.get('filename','')}">{r.get('filename','')[:28]}</div>
+                <div style="color:#72c472; overflow:hidden; text-overflow:ellipsis;
+                            white-space:nowrap;">{r.get('disease_label','—')}</div>
+                <div>{float(r.get('vlm_time',0) or 0):.1f}s</div>
+                <div>{float(r.get('llm_time',0) or 0):.1f}s</div>
+                <div>{float(r.get('db_time',0) or 0):.2f}s</div>
+                <div style="color:#74aaff;">{float(r.get('total_time',0) or 0):.1f}s</div>
+                <div style="color:{exp_col};">{exp_txt}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════
 # SETTINGS
 # ══════════════════════════════════════════════════════════
 if PAGE == "settings":
@@ -1556,18 +1667,6 @@ if PAGE == "settings":
             </div>
             """, unsafe_allow_html=True)
 
-        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-        section("How to update API URL")
-        st.markdown("""
-        <div style="font-family:'Inter',sans-serif; font-size:13px;
-                    color:#6a7385; line-height:2.2;">
-            1. Go to Google Colab<br>
-            2. Run Cell 8<br>
-            3. Copy the ngrok URL from the output<br>
-            4. Paste it in the field above and click Save
-        </div>
-        """, unsafe_allow_html=True)
-
     with sc2:
         section("AI Models")
 
@@ -1576,8 +1675,8 @@ if PAGE == "settings":
              "PubMedCLIP",
              "flaviagiammarino/pubmed-clip-vit-base-patch32"),
             ("Report Generator",
-             "Template-based",
-             "Structured clinical observation format"),
+             "LLaMA (Ollama)",
+             "Prompt-engineered structured observation report"),
             ("Input Resolution",
              "224 x 224 RGB",
              "Preprocessed on upload from any input size"),
