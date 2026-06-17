@@ -236,24 +236,68 @@ details > summary:hover { border-color: #4d8ef0 !important; color: #fff !importa
 [data-testid="column"] { padding: 0 6px !important; }
 
 /* ── CXR animated loading / buffering visual ─────────────── */
-@keyframes cxrSpin { to { transform: rotate(360deg); } }
-@keyframes cxrBar  { 0% { left:-40%; } 100% { left:100%; } }
-@keyframes cxrPing { 0%,100% { opacity:0.45; } 50% { opacity:1; } }
+@keyframes cxrSpin  { to { transform: rotate(360deg); } }
+@keyframes cxrSpinR { to { transform: rotate(-360deg); } }
+@keyframes cxrBar   { 0% { left:-45%; } 100% { left:115%; } }
+@keyframes cxrFloat { 0%,100% { transform:translateY(0); }
+                      50% { transform:translateY(-4px); } }
+@keyframes cxrGlow  { 0%,100% { box-shadow:0 0 0 0 rgba(77,142,240,0.0); }
+                      50% { box-shadow:0 0 22px 3px rgba(77,142,240,0.30); } }
+@keyframes cxrCore  { 0%,100% { transform:scale(0.62); opacity:0.55; }
+                      50% { transform:scale(1.05); opacity:1; } }
+@keyframes cxrDots  { 0%,20% { content:''; } 40% { content:'.'; }
+                      60% { content:'..'; } 80%,100% { content:'...'; } }
+
 .cxr-load-wrap { display:flex; flex-direction:column; align-items:center;
-    justify-content:center; gap:16px; padding:30px 0 24px;
-    animation:cxrPing 2s ease-in-out infinite; }
-.cxr-spin { width:46px; height:46px; border-radius:50%;
-    border:4px solid #283a55; border-top-color:#4d8ef0;
-    animation:cxrSpin 0.8s linear infinite; }
-.cxr-track { position:relative; width:220px; height:4px; background:#222a36;
-    border-radius:3px; overflow:hidden; }
-.cxr-track::after { content:""; position:absolute; top:0; width:40%;
-    height:100%; border-radius:3px;
-    background:linear-gradient(90deg,transparent,#4d8ef0,#74aaff,transparent);
-    animation:cxrBar 1.1s ease-in-out infinite; }
-.cxr-txt { font-family:'JetBrains Mono',monospace; font-size:12px;
-    letter-spacing:1.5px; color:#74aaff; text-transform:uppercase;
-    text-align:center; }
+    justify-content:center; gap:18px; padding:34px 0 26px; }
+
+/* Dual concentric rings, floating with a soft glow */
+.cxr-spin { position:relative; width:60px; height:60px; border-radius:50%;
+    animation:cxrFloat 2.6s ease-in-out infinite,
+              cxrGlow  2.6s ease-in-out infinite; }
+.cxr-spin::before, .cxr-spin::after { content:""; position:absolute;
+    border-radius:50%; border:3px solid transparent; }
+.cxr-spin::before { inset:0; border-top-color:#4d8ef0; border-right-color:#74aaff;
+    animation:cxrSpin 1s cubic-bezier(0.5,0.15,0.35,0.9) infinite; }
+.cxr-spin::after  { inset:10px; border-width:2px; border-bottom-color:#74aaff;
+    border-left-color:#3a6fc0; animation:cxrSpinR 1.5s linear infinite; }
+
+/* Pulsing core */
+.cxr-core { position:absolute; top:50%; left:50%; width:12px; height:12px;
+    margin:-6px 0 0 -6px; border-radius:50%;
+    background:radial-gradient(circle at 35% 35%,#bcd8ff,#4d8ef0);
+    box-shadow:0 0 10px rgba(116,170,255,0.7);
+    animation:cxrCore 1.4s ease-in-out infinite; }
+
+/* Shimmer progress track */
+.cxr-track { position:relative; width:240px; height:3px;
+    background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; }
+.cxr-track::after { content:""; position:absolute; top:0; width:45%; height:100%;
+    border-radius:4px; filter:drop-shadow(0 0 6px rgba(77,142,240,0.6));
+    background:linear-gradient(90deg,transparent,#4d8ef0 35%,#bcd8ff 50%,
+              #4d8ef0 65%,transparent);
+    animation:cxrBar 1.4s cubic-bezier(0.45,0.05,0.55,0.95) infinite; }
+
+/* Caption with animated typing dots */
+.cxr-txt { font-family:'JetBrains Mono',monospace; font-size:11px;
+    letter-spacing:2.5px; color:#8fb8f0; text-transform:uppercase;
+    font-weight:500; text-align:center; opacity:0.92; }
+.cxr-txt::after { content:'...'; display:inline-block; width:1.4em;
+    text-align:left; animation:cxrDots 1.6s steps(1,end) infinite; }
+
+/* Full-screen popup overlay that dims + blurs the whole app */
+@keyframes cxrFade { from { opacity:0; } to { opacity:1; } }
+@keyframes cxrRise { from { opacity:0; transform:translateY(10px) scale(0.98); }
+                     to   { opacity:1; transform:translateY(0) scale(1); } }
+.cxr-overlay { position:fixed; inset:0; z-index:99999;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(10,13,18,0.74);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+    animation:cxrFade 0.2s ease both; }
+.cxr-card { background:linear-gradient(160deg,#1f2530,#181d26);
+    border:1px solid #2b3240; border-radius:16px; padding:30px 50px 28px;
+    box-shadow:0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(77,142,240,0.06);
+    animation:cxrRise 0.28s cubic-bezier(0.2,0.8,0.2,1) both; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -367,14 +411,21 @@ def add_recent(image_id):
 from contextlib import contextmanager
 
 @contextmanager
-def cxr_spinner(text="Loading…"):
+def cxr_spinner(text="Loading"):
     """Animated buffering visual used in place of st.spinner everywhere."""
+    # The trailing dots are supplied by the animated CSS, so strip any the
+    # caller passed to avoid doubling them up (e.g. "Opening study...").
+    label = text.rstrip(" .…")
     holder = st.empty()
     holder.markdown(f"""
-    <div class="cxr-load-wrap">
-        <div class="cxr-spin"></div>
-        <div class="cxr-track"></div>
-        <div class="cxr-txt">{text}</div>
+    <div class="cxr-overlay">
+      <div class="cxr-card">
+        <div class="cxr-load-wrap">
+            <div class="cxr-spin"><div class="cxr-core"></div></div>
+            <div class="cxr-track"></div>
+            <div class="cxr-txt">{label}</div>
+        </div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
     try:
@@ -532,29 +583,14 @@ if st.session_state.page == "cover":
             # so the user knows the system is working.
             _loader = st.empty()
             _loader.markdown("""
-            <style>
-              @keyframes cxrSpin { to { transform: rotate(360deg); } }
-              @keyframes cxrBar  { 0% { left:-40%; } 100% { left:100%; } }
-              @keyframes cxrPing { 0%,100% { opacity:0.35; } 50% { opacity:1; } }
-              .cxr-load-wrap { display:flex; flex-direction:column;
-                  align-items:center; justify-content:center; gap:18px;
-                  padding:46px 0 30px; animation:cxrPing 2s ease-in-out infinite; }
-              .cxr-spin { width:54px; height:54px; border-radius:50%;
-                  border:4px solid #283a55; border-top-color:#4d8ef0;
-                  animation:cxrSpin 0.8s linear infinite; }
-              .cxr-track { position:relative; width:240px; height:4px;
-                  background:#222a36; border-radius:3px; overflow:hidden; }
-              .cxr-track::after { content:""; position:absolute; top:0;
-                  width:40%; height:100%; border-radius:3px;
-                  background:linear-gradient(90deg,transparent,#4d8ef0,#74aaff,transparent);
-                  animation:cxrBar 1.1s ease-in-out infinite; }
-              .cxr-txt { font-family:'JetBrains Mono',monospace; font-size:12px;
-                  letter-spacing:2px; color:#74aaff; text-transform:uppercase; }
-            </style>
-            <div class="cxr-load-wrap">
-              <div class="cxr-spin"></div>
-              <div class="cxr-track"></div>
-              <div class="cxr-txt">Loading workstation…</div>
+            <div class="cxr-overlay">
+              <div class="cxr-card">
+                <div class="cxr-load-wrap">
+                  <div class="cxr-spin"><div class="cxr-core"></div></div>
+                  <div class="cxr-track"></div>
+                  <div class="cxr-txt">Loading workstation</div>
+                </div>
+              </div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -938,11 +974,22 @@ if PAGE == "viewer":
             else:
                 st.markdown("""
                 <div style="background:#000000; border:1px solid #1e2430;
-                            border-top:none; height:320px; display:flex;
+                            border-top:none; min-height:320px; display:flex;
                             align-items:center; justify-content:center;
-                            color:#2a3040; font-family:'JetBrains Mono',
-                            monospace; font-size:13px;">
-                    Image unavailable — check API connection
+                            flex-direction:column; gap:10px; padding:24px;
+                            text-align:center; color:#5a6a7a;
+                            font-family:'JetBrains Mono',monospace;
+                            font-size:12px; line-height:1.7;">
+                    <div style="font-size:13px; color:#8a9aaa;">
+                        Image file not available on the server
+                    </div>
+                    <div style="color:#46546b; max-width:360px;">
+                        The report is stored, but the image isn't on the current
+                        backend. This happens when the study was uploaded in a
+                        previous Colab session (the image files are not kept in
+                        MongoDB, only the report). Re-upload the X-ray, or check
+                        the API URL in Settings.
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 if st.button("Retry loading image",
