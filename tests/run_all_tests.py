@@ -116,7 +116,7 @@ def run_pytest(test_file: str, quick: bool = False) -> dict:
 
 def benchmark_timing(max_images: int = 5) -> dict:
     """
-    Run the REAL pipeline (PubMedCLIP + TinyLlama) on a handful of
+    Run the REAL pipeline (BiomedCLIP + TinyLlama) on a handful of
     processed images and record measured processing times.
 
     Unlike the pytest suites — which only assert that times stay under a
@@ -124,7 +124,7 @@ def benchmark_timing(max_images: int = 5) -> dict:
     Response Time table (Section 4.4.1) is reproducible from the test runner.
     """
     print("  [PERF] Response-time benchmark (real models)")
-    print("         Running PubMedCLIP + TinyLlama on sample images...")
+    print("         Running BiomedCLIP + TinyLlama on sample images...")
     print()
 
     images = sorted((ROOT / "data" / "processed" / "images").glob("*.png"))[:max_images]

@@ -1,12 +1,12 @@
 """
 pipeline.py
 ===========
-Full Inference Pipeline — PubMedCLIP + LLaMA
+Full Inference Pipeline — BiomedCLIP + LLaMA
 
 Flow:
     CXR Image
         |
-        ├─> PubMedCLIP  → disease predictions (image-text matching)
+        ├─> BiomedCLIP  → disease predictions (image-text matching)
         |
         └─> LLaMA       → structured observational report
 
@@ -26,7 +26,7 @@ from models.llm_refine import refine_llm
 
 def run_pipeline(image_path: str) -> dict:
     """
-    Full pipeline: CXR image -> PubMedCLIP -> LLaMA report
+    Full pipeline: CXR image -> BiomedCLIP -> LLaMA report
 
     Returns:
         {
@@ -63,8 +63,8 @@ def run_pipeline(image_path: str) -> dict:
     }
 
     try:
-        # Step 1 — PubMedCLIP disease prediction
-        print(f"  [Pipeline] Step 1/2 — PubMedCLIP inference...")
+        # Step 1 — BiomedCLIP disease prediction
+        print(f"  [Pipeline] Step 1/2 — BiomedCLIP inference...")
         vlm_start   = time.time()
         vlm_result  = infer_vlm_with_label(str(image_path))
         vlm_elapsed = round(time.time() - vlm_start, 3)
@@ -73,7 +73,7 @@ def run_pipeline(image_path: str) -> dict:
         # it as an error instead of generating a bogus report downstream.
         if not vlm_result.get("success", False):
             raise RuntimeError(
-                "PubMedCLIP inference failed — model unavailable or "
+                "BiomedCLIP inference failed — model unavailable or "
                 "prediction error. Check that the model loaded correctly."
             )
 
@@ -118,7 +118,7 @@ def run_pipeline(image_path: str) -> dict:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Full Pipeline — PubMedCLIP + LLaMA")
+    print("  Full Pipeline — BiomedCLIP + LLaMA")
     print("=" * 60)
 
     images_dir = ROOT / "data" / "processed" / "images"

@@ -98,7 +98,7 @@ class TestImageLoading:
 
 
 # ─────────────────────────────────────────────────────────────
-# TEST 2: VLM INFERENCE — PubMedCLIP output structure
+# TEST 2: VLM INFERENCE — BiomedCLIP output structure
 # ─────────────────────────────────────────────────────────────
 class TestVLMFunctionality:
     def test_vlm_returns_all_required_keys(self, sample_image_path):

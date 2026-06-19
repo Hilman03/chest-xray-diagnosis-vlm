@@ -86,7 +86,7 @@ app = FastAPI(
     title       = "CXR PACS Analysis API",
     description = (
         "AI-powered Chest X-Ray analysis system. "
-        "Uses pretrained VLM (PubMedCLIP) for disease prediction "
+        "Uses pretrained VLM (BiomedCLIP) for disease prediction "
         "and LLM for generating descriptive observational reports. "
         "Inference only — no model training involved."
     ),
@@ -208,7 +208,7 @@ def generate_pdf(record: dict) -> bytes:
 
         # AI Analysis
         pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "VLM Analysis Results (PubMedCLIP)", ln=True)
+        pdf.cell(0, 8, "VLM Analysis Results (BiomedCLIP)", ln=True)
         pdf.set_font("Arial", "", 11)
         pdf.cell(0, 6,
                  _latin1(f"Primary Finding : {record.get('disease_label', 'N/A')}"),
@@ -264,7 +264,7 @@ def generate_pdf(record: dict) -> bytes:
                 pdf.set_font("Arial", "I", 8)
                 pdf.multi_cell(0, 4, _latin1(
                     "Left: chest radiograph.  Right: Grad-CAM heatmap - warm "
-                    "regions show where PubMedCLIP focused for the predicted "
+                    "regions show where BiomedCLIP focused for the predicted "
                     "finding (explainability only, not precise localization)."))
                 pdf.ln(3)
 
@@ -341,23 +341,29 @@ async def startup_event():
     else:
         print("  [Startup] No MONGODB_URI — using in-memory store")
 
-    print("  [Startup] Pre-loading PubMedCLIP model...")
-    try:
-        from vlm_inference import load_model
-        load_model()
-        print("  [Startup] PubMedCLIP ready")
-    except Exception as e:
-        print(f"  [Startup] PubMedCLIP pre-load skipped: {e}")
+    # Set SKIP_MODEL_PRELOAD=1 to boot a lightweight server (no VLM/LLM) —
+    # useful for UI/endpoint testing such as upload + /reports. Analysis
+    # endpoints will load models on demand instead.
+    if os.getenv("SKIP_MODEL_PRELOAD", "").strip() in ("1", "true", "True"):
+        print("  [Startup] SKIP_MODEL_PRELOAD set — skipping VLM/LLM preload")
+    else:
+        print("  [Startup] Pre-loading BiomedCLIP model...")
+        try:
+            from vlm_inference import load_model
+            load_model()
+            print("  [Startup] BiomedCLIP ready")
+        except Exception as e:
+            print(f"  [Startup] BiomedCLIP pre-load skipped: {e}")
 
-    print("  [Startup] Pre-loading LLM (in-process transformers)...")
-    try:
-        from llm_refine import load_llm, LLM_MODEL
-        if load_llm():
-            print(f"  [Startup] LLM ready — {LLM_MODEL}")
-        else:
-            print(f"  [Startup] WARNING: LLM '{LLM_MODEL}' failed to load")
-    except Exception as e:
-        print(f"  [Startup] LLM pre-load skipped: {e}")
+        print("  [Startup] Pre-loading LLM (in-process transformers)...")
+        try:
+            from llm_refine import load_llm, LLM_MODEL
+            if load_llm():
+                print(f"  [Startup] LLM ready — {LLM_MODEL}")
+            else:
+                print(f"  [Startup] WARNING: LLM '{LLM_MODEL}' failed to load")
+        except Exception as e:
+            print(f"  [Startup] LLM pre-load skipped: {e}")
 
     # Resource-usage snapshot — verifies models are resident in memory and
     # helps monitor footprint. Skipped silently if psutil is unavailable.
@@ -495,9 +501,9 @@ async def analyze_image(image_id: str):
     Run AI pipeline on uploaded image.
 
     Pipeline:
-        1. PubMedCLIP (VLM) — predicts disease from image
+        1. BiomedCLIP (VLM) — predicts disease from image
         2. Ollama LLM — generates structured observational report
-           (prompt-engineered, grounded in the PubMedCLIP findings)
+           (prompt-engineered, grounded in the BiomedCLIP findings)
         3. Stores result in MongoDB Atlas
 
     Returns descriptive and interpretable textual output
@@ -641,6 +647,8 @@ async def list_all_reports():
             {
                 "image_id"       : r.get("image_id", ""),
                 "filename"       : r.get("filename", ""),
+                "patient_id"     : (r.get("dicom_metadata") or {}).get("patient_id", ""),
+                "patient_name"   : (r.get("dicom_metadata") or {}).get("patient_name", ""),
                 "status"         : r.get("status", ""),
                 "disease_label"  : r.get("disease_label", ""),
                 "is_dicom"       : r.get("is_dicom", False),
@@ -686,7 +694,7 @@ async def get_image(image_id: str):
 @app.get("/heatmap/{image_id}")
 async def get_heatmap(image_id: str):
     """
-    Grad-CAM heatmap overlay showing where PubMedCLIP focused for the predicted
+    Grad-CAM heatmap overlay showing where BiomedCLIP focused for the predicted
     disease. Reuses the existing VLM (no new model). Falls back to the GridFS
     image copy if the disk file is gone.
     """
@@ -823,7 +831,7 @@ async def functional_test(image_id: str):
         vlm_time   = round(time.time() - start, 3)
 
         test_results["tests"]["vlm_inference"] = {
-            "name"          : "VLM Inference (PubMedCLIP)",
+            "name"          : "VLM Inference (BiomedCLIP)",
             "status"        : "PASS",
             "disease_label" : vlm_result["disease_label"],
             "top_diseases"  : vlm_result["top_diseases"],
@@ -832,7 +840,7 @@ async def functional_test(image_id: str):
         }
     except Exception as e:
         test_results["tests"]["vlm_inference"] = {
-            "name"   : "VLM Inference (PubMedCLIP)",
+            "name"   : "VLM Inference (BiomedCLIP)",
             "status" : "FAIL",
             "detail" : str(e),
         }
@@ -953,7 +961,7 @@ async def system_status():
         "mongodb"         : "connected" if is_mongo_connected() else "in-memory only",
         "total_reports"   : len(list_records()),
         "models_loaded"   : {
-            "vlm" : "PubMedCLIP (flaviagiammarino/pubmed-clip-vit-base-patch32)",
+            "vlm" : "BiomedCLIP (microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224)",
             "llm" : "Ollama vision (llama3.2-vision)",
         },
         "inference_only"  : True,
@@ -1045,15 +1053,15 @@ async def run_system_tests():
             t0 = time.time()
             vlm_result = infer_vlm_with_label(image_path)
             elapsed = round(time.time() - t0, 3)
-            _r("VLM Inference (PubMedCLIP)", "PASS",
+            _r("VLM Inference (BiomedCLIP)", "PASS",
                f"Primary: {vlm_result['disease_label']}  |  Time: {elapsed}s",
                disease_label=vlm_result["disease_label"],
                top_diseases=vlm_result["top_diseases"],
                response_time=elapsed)
         except Exception as e:
-            _r("VLM Inference (PubMedCLIP)", "FAIL", str(e))
+            _r("VLM Inference (BiomedCLIP)", "FAIL", str(e))
     else:
-        _r("VLM Inference (PubMedCLIP)", "SKIP", "No image to test")
+        _r("VLM Inference (BiomedCLIP)", "SKIP", "No image to test")
 
     # ── Test 4: output structure ──────────────────────────────
     if vlm_result:

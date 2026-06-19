@@ -1,21 +1,24 @@
 """
 models/vlm_inference.py
 =======================
-VLM Inference using PubMedCLIP
-Model: flaviagiammarino/pubmed-clip-vit-base-patch32
+VLM Inference using BiomedCLIP (zero-shot vision-language model).
 
-PubMedCLIP is trained on PubMed medical images and understands
-medical terminology. It works by matching the CXR image against
-disease text descriptions and scoring similarity.
+Model: microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224
+
+BiomedCLIP is trained on PMC-15M (15M biomedical image-text pairs) — far
+larger and broader than PubMedCLIP — so it is a stronger zero-shot chest-X-ray
+matcher while remaining a true vision-language model (image encoder + text
+encoder). It scores the CXR image against disease text descriptions and ranks
+them by similarity.
 
 Flow:
-    CXR Image + Disease text descriptions
-        -> PubMedCLIP scores similarity for each disease
+    CXR Image + Disease text descriptions (prompt-ensembled)
+        -> BiomedCLIP scores similarity for each disease
         -> Returns ranked diseases with confidence scores
         -> Passed to LLaMA for structured report
 
-Install:
-    pip install torch torchvision transformers pillow requests
+Loaded via open_clip (not HuggingFace CLIPModel):
+    pip install open_clip_torch
 """
 
 import sys
@@ -27,65 +30,113 @@ sys.path.insert(0, str(ROOT))
 import time
 import torch
 from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-MODEL_NAME     = "flaviagiammarino/pubmed-clip-vit-base-patch32"
+MODEL_NAME     = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+MODEL_TAG      = f"hf-hub:{MODEL_NAME}"
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 TOP_N_DISEASES = 3
+CONTEXT_LEN    = 256
 
-# Disease text descriptions for PubMedCLIP matching
-# Phrased as medical observations — matches how PubMed papers describe findings
-DISEASE_TEMPLATES = {
-    "Atelectasis"       : "Chest X-Ray showing atelectasis with partial lung collapse",
-    "Cardiomegaly"      : "Chest X-Ray showing cardiomegaly with enlarged cardiac silhouette",
-    "Consolidation"     : "Chest X-Ray showing consolidation with dense homogeneous opacity",
-    "Edema"             : "Chest X-Ray showing pulmonary edema with bilateral haziness",
-    "Effusion"          : "Chest X-Ray showing pleural effusion with blunting of costophrenic angle",
-    "Emphysema"         : "Chest X-Ray showing emphysema with hyperinflated lungs",
-    "Fibrosis"          : "Chest X-Ray showing pulmonary fibrosis with reticular opacity",
-    "Hernia"            : "Chest X-Ray showing hiatal hernia with bowel above diaphragm",
-    "Infiltration"      : "Chest X-Ray showing lung infiltration with patchy haziness",
-    "Mass"              : "Chest X-Ray showing a large lung mass with irregular border",
-    "Nodule"            : "Chest X-Ray showing a small pulmonary nodule",
-    "Pleural_Thickening": "Chest X-Ray showing pleural thickening along lateral chest wall",
-    "Pneumonia"         : "Chest X-Ray showing pneumonia with lobar opacity and consolidation",
-    "Pneumothorax"      : "Chest X-Ray showing pneumothorax with visible pleural line",
-    "No Finding"        : "Normal Chest X-Ray with clear lung fields and no abnormalities",
+# Prompt-ensembling: several phrasings per disease are scored and averaged,
+# which is more robust for zero-shot CLIP than a single template.
+DISEASE_PROMPTS = {
+    "Atelectasis"       : ["chest x-ray showing atelectasis",
+                           "lung collapse on chest radiograph",
+                           "atelectasis with volume loss"],
+    "Cardiomegaly"      : ["chest x-ray showing cardiomegaly",
+                           "enlarged cardiac silhouette",
+                           "an enlarged heart on chest radiograph"],
+    "Consolidation"     : ["chest x-ray showing consolidation",
+                           "dense airspace consolidation in the lung",
+                           "lobar consolidation on chest radiograph"],
+    "Edema"             : ["chest x-ray showing pulmonary edema",
+                           "bilateral pulmonary edema with haziness",
+                           "fluid overload pulmonary edema"],
+    "Effusion"          : ["chest x-ray showing pleural effusion",
+                           "blunting of the costophrenic angle from effusion",
+                           "pleural fluid effusion on chest radiograph"],
+    "Emphysema"         : ["chest x-ray showing emphysema",
+                           "hyperinflated lungs with emphysema",
+                           "emphysematous lungs on chest radiograph"],
+    "Fibrosis"          : ["chest x-ray showing pulmonary fibrosis",
+                           "reticular fibrotic opacities in the lung",
+                           "interstitial pulmonary fibrosis"],
+    "Hernia"            : ["chest x-ray showing a hiatal hernia",
+                           "diaphragmatic hernia on chest radiograph",
+                           "bowel above the diaphragm hernia"],
+    "Infiltration"      : ["chest x-ray showing lung infiltration",
+                           "patchy pulmonary infiltrate",
+                           "ill-defined infiltration in the lung"],
+    "Mass"              : ["chest x-ray showing a lung mass",
+                           "a large pulmonary mass with irregular border",
+                           "soft tissue mass in the lung"],
+    "Nodule"            : ["chest x-ray showing a pulmonary nodule",
+                           "a small solitary lung nodule",
+                           "rounded nodular opacity in the lung"],
+    "Pleural_Thickening": ["chest x-ray showing pleural thickening",
+                           "thickened pleura along the chest wall",
+                           "pleural thickening on chest radiograph"],
+    "Pneumonia"         : ["chest x-ray showing pneumonia",
+                           "lobar pneumonia with consolidation",
+                           "infectious pneumonia in the lung"],
+    "Pneumothorax"      : ["chest x-ray showing pneumothorax",
+                           "collapsed lung with a visible pleural line",
+                           "air in the pleural space pneumothorax"],
+    "No Finding"        : ["a normal chest x-ray with clear lungs",
+                           "no acute cardiopulmonary abnormality",
+                           "healthy chest radiograph with no findings"],
 }
 
-# Singleton
-_model     = None
-_processor = None
+# One human-readable description per disease for the report/LLM/Grad-CAM.
+DISEASE_TEMPLATES = {d: p[0] for d, p in DISEASE_PROMPTS.items()}
+
+# Singletons
+_model      = None
+_preprocess = None
+_tokenizer  = None
+_text_feat  = None                     # cached, normalised, ensembled text features
+_disease_names = list(DISEASE_PROMPTS.keys())
 
 
 # ─────────────────────────────────────────────────────────────
 # LOAD MODEL
 # ─────────────────────────────────────────────────────────────
 def load_model():
-    global _model, _processor
+    global _model, _preprocess, _tokenizer, _text_feat
 
     if _model is not None:
         return True
 
     try:
-        print(f"  [PubMedCLIP] Loading : {MODEL_NAME}")
-        print(f"  [PubMedCLIP] Device  : {DEVICE}")
-        print(f"  [PubMedCLIP] Trained on PubMed medical images")
-        print(f"  [PubMedCLIP] Downloading — please wait...")
+        from open_clip import create_model_from_pretrained, get_tokenizer
+        print(f"  [BiomedCLIP] Loading : {MODEL_NAME}")
+        print(f"  [BiomedCLIP] Device  : {DEVICE}")
+        print(f"  [BiomedCLIP] Trained on PMC-15M biomedical image-text pairs")
 
-        _processor = CLIPProcessor.from_pretrained(MODEL_NAME)
-        _model     = CLIPModel.from_pretrained(MODEL_NAME)
-        _model.to(DEVICE)
-        _model.eval()
+        _model, _preprocess = create_model_from_pretrained(MODEL_TAG)
+        _tokenizer = get_tokenizer(MODEL_TAG)
+        _model.to(DEVICE).eval()
 
-        print(f"  [PubMedCLIP] Loaded successfully")
+        # Pre-compute averaged text features per disease (prompt ensemble).
+        feats = []
+        with torch.no_grad():
+            for name in _disease_names:
+                toks = _tokenizer(DISEASE_PROMPTS[name],
+                                  context_length=CONTEXT_LEN).to(DEVICE)
+                tf = _model.encode_text(toks)
+                tf = tf / tf.norm(dim=-1, keepdim=True)
+                feats.append(tf.mean(dim=0, keepdim=True))
+        _text_feat = torch.cat(feats, dim=0)
+        _text_feat = _text_feat / _text_feat.norm(dim=-1, keepdim=True)
+
+        print(f"  [BiomedCLIP] Loaded successfully ({len(_disease_names)} classes)")
         return True
 
     except Exception as e:
-        print(f"  [PubMedCLIP] Failed to load: {e}")
+        print(f"  [BiomedCLIP] Failed to load: {e}")
         return False
 
 
@@ -94,14 +145,7 @@ def load_model():
 # ─────────────────────────────────────────────────────────────
 def predict_diseases(image_path: str) -> dict:
     """
-    Predict diseases by matching CXR image against disease descriptions.
-
-    Uses same approach as the official PubMedCLIP usage example:
-        processor(text=texts, images=image, return_tensors="pt")
-        model(**inputs).logits_per_image.softmax(dim=1)
-
-    Args:
-        image_path : path to CXR image
+    Predict diseases by matching the CXR image against disease descriptions.
 
     Returns:
         {
@@ -122,41 +166,21 @@ def predict_diseases(image_path: str) -> dict:
         }
 
     try:
-        # Load CXR image
-        image = Image.open(str(image_path)).convert("RGB")
+        image = _preprocess(
+            Image.open(str(image_path)).convert("RGB")).unsqueeze(0).to(DEVICE)
 
-        # Get disease names and descriptions
-        disease_names = list(DISEASE_TEMPLATES.keys())
-        disease_texts = list(DISEASE_TEMPLATES.values())
-
-        # Process image + all disease texts (official usage pattern)
-        inputs = _processor(
-            text=disease_texts,
-            images=image,
-            return_tensors="pt",
-            padding=True,
-        )
-
-        # Move to device
-        inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
-
-        # Get similarity scores
         with torch.no_grad():
-            outputs = _model(**inputs)
-            probs   = outputs.logits_per_image.softmax(dim=1).squeeze()
+            img_f = _model.encode_image(image)
+            img_f = img_f / img_f.norm(dim=-1, keepdim=True)
+            logit_scale = _model.logit_scale.exp()
+            probs = (logit_scale * img_f @ _text_feat.t()).softmax(dim=-1).squeeze(0)
 
-        # Map disease names to scores
         all_scores = {
             disease: round(float(prob), 4)
-            for disease, prob in zip(disease_names, probs)
+            for disease, prob in zip(_disease_names, probs)
         }
-
-        # Sort by score descending
         sorted_diseases = sorted(
-            all_scores.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
+            all_scores.items(), key=lambda x: x[1], reverse=True)
 
         top_diseases  = sorted_diseases[:TOP_N_DISEASES]
         primary_label = top_diseases[0][0]
@@ -171,7 +195,7 @@ def predict_diseases(image_path: str) -> dict:
         }
 
     except Exception as e:
-        print(f"  [PubMedCLIP] Prediction error: {e}")
+        print(f"  [BiomedCLIP] Prediction error: {e}")
         return {
             "top_diseases" : [("Unknown", 0.0)],
             "all_scores"   : {},
@@ -186,10 +210,7 @@ def predict_diseases(image_path: str) -> dict:
 # ─────────────────────────────────────────────────────────────
 def infer_vlm_with_label(image_path: str) -> dict:
     """
-    Full PubMedCLIP inference on a CXR image.
-
-    Args:
-        image_path : full path to CXR image (PNG)
+    Full BiomedCLIP inference on a CXR image.
 
     Returns:
         {
@@ -209,13 +230,13 @@ def infer_vlm_with_label(image_path: str) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
 
-    print(f"  [PubMedCLIP] Predicting diseases...")
+    print(f"  [BiomedCLIP] Predicting diseases...")
     result = predict_diseases(image_path)
 
-    print(f"  [PubMedCLIP] Primary disease : {result['primary_label']}")
-    print(f"  [PubMedCLIP] Top predictions :")
+    print(f"  [BiomedCLIP] Primary disease : {result['primary_label']}")
+    print(f"  [BiomedCLIP] Top predictions :")
     for disease, score in result["top_diseases"]:
-        bar = "█" * int(score * 40)
+        bar = "#" * int(score * 40)
         print(f"               {disease:<25} : {bar:<40} {score*100:.1f}%")
 
     elapsed = round(time.time() - start, 3)
@@ -232,7 +253,7 @@ def infer_vlm_with_label(image_path: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# GRAD-CAM EXPLAINABILITY (heatmap of where PubMedCLIP "looked")
+# GRAD-CAM EXPLAINABILITY (heatmap of where BiomedCLIP "looked")
 # ─────────────────────────────────────────────────────────────
 def _jet_colormap(cam):
     """Map a HxW array in [0,1] to a jet-like RGB uint8 image (numpy only)."""
@@ -245,10 +266,10 @@ def _jet_colormap(cam):
 
 def compute_gradcam(image, disease_label: str) -> bytes:
     """
-    Grad-CAM heatmap for PubMedCLIP — highlights the image regions that most
-    drove the similarity to the predicted disease's text description. This is
-    a visualization of the EXISTING model (gradients of its own score); it adds
-    no new model and does not change the architecture.
+    Grad-CAM heatmap for BiomedCLIP — highlights the image regions that most
+    drove the similarity to the predicted disease's text description. This is a
+    visualization of the EXISTING model (gradients of its own score); it adds no
+    new model and does not change the architecture.
 
     Args:
         image         : a PIL.Image (RGB) of the chest X-ray
@@ -261,18 +282,23 @@ def compute_gradcam(image, disease_label: str) -> bytes:
     import numpy as np
 
     if not load_model():
-        raise RuntimeError("PubMedCLIP unavailable — cannot compute Grad-CAM.")
+        raise RuntimeError("BiomedCLIP unavailable — cannot compute Grad-CAM.")
 
     image = image.convert("RGB")
-    text  = DISEASE_TEMPLATES.get(
-        disease_label, f"Chest X-Ray showing {disease_label}")
+    img_t = _preprocess(image).unsqueeze(0).to(DEVICE)
 
-    inputs = _processor(text=[text], images=image,
-                        return_tensors="pt", padding=True)
-    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+    # Ensembled, normalised text feature for the target disease.
+    prompts = DISEASE_PROMPTS.get(
+        disease_label, [f"chest x-ray showing {disease_label}"])
+    with torch.no_grad():
+        toks = _tokenizer(prompts, context_length=CONTEXT_LEN).to(DEVICE)
+        tf = _model.encode_text(toks)
+        tf = tf / tf.norm(dim=-1, keepdim=True)
+        tf = tf.mean(dim=0, keepdim=True)
+        tf = tf / tf.norm(dim=-1, keepdim=True)
 
-    # Capture activations + gradients of the last vision transformer block.
-    layer = _model.vision_model.encoder.layers[-1]
+    # Hook the last vision-transformer block of the timm trunk.
+    layer = _model.visual.trunk.blocks[-1]
     store = {}
 
     def _fwd_hook(_m, _i, out):
@@ -284,42 +310,36 @@ def compute_gradcam(image, disease_label: str) -> bytes:
     try:
         _model.zero_grad(set_to_none=True)
         with torch.enable_grad():
-            out   = _model(**inputs)
-            score = out.logits_per_image[0, 0]   # image↔disease-text similarity
+            img_f = _model.encode_image(img_t)
+            img_f = img_f / img_f.norm(dim=-1, keepdim=True)
+            score = (_model.logit_scale.exp() * img_f @ tf.t())[0, 0]
             score.backward()
     finally:
         handle.remove()
 
-    act  = store["act"].detach().float()        # [1, tokens, dim]
-    grad = act.grad if act.grad is not None else store["act"].grad
-    grad = grad.detach().float()                 # [1, tokens, dim]
+    act  = store["act"].detach().float()         # [1, tokens, dim]
+    grad = store["act"].grad.detach().float()     # [1, tokens, dim]
 
-    # Canonical Grad-CAM: channel weights = global-average-pooled gradients,
-    # CAM = ReLU(sum_c w_c * activation_c) per token.
-    weights = grad.mean(dim=1, keepdim=True)     # [1, 1, dim]
-    cam     = (weights * act).sum(dim=-1)[0]     # [tokens]
-    cam     = cam[1:]                            # drop CLS token
+    weights = grad.mean(dim=1, keepdim=True)      # [1, 1, dim]
+    cam     = (weights * act).sum(dim=-1)[0]      # [tokens]
+    cam     = cam[1:]                             # drop CLS token
     cam     = torch.relu(cam)
 
-    side = int(cam.shape[0] ** 0.5)              # 49 -> 7 for patch32 @224
+    side = int(cam.shape[0] ** 0.5)               # 196 -> 14 for patch16 @224
     cam  = cam[: side * side].reshape(side, side)
     cam  = cam.cpu().numpy().astype("float32")
 
-    # Suppress the broad baseline so only the strongest regions light up
-    # (map the median->99th-percentile range into 0..1). Keeps the heatmap
-    # focused instead of flooding the whole image.
     lo = np.percentile(cam, 60)
     hi = np.percentile(cam, 99)
     cam = np.clip((cam - lo) / (hi - lo + 1e-8), 0, 1)
 
-    # Upsample the small CAM grid to image size with PIL (no cv2/scipy needed).
     base = np.array(image.resize((224, 224))).astype("float32")
     cam_img = Image.fromarray((cam * 255).astype("uint8")).resize(
         (224, 224), Image.BILINEAR)
     cam_up  = np.array(cam_img).astype("float32") / 255.0
 
     color   = _jet_colormap(cam_up).astype("float32")
-    alpha   = (cam_up * 0.6)[..., None]          # hot areas colored, anatomy still visible
+    alpha   = (cam_up * 0.6)[..., None]
     overlay = (base * (1 - alpha) + color * alpha).astype("uint8")
 
     buf = io.BytesIO()
@@ -332,7 +352,7 @@ def compute_gradcam(image, disease_label: str) -> bytes:
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 60)
-    print("  PubMedCLIP VLM Inference")
+    print("  BiomedCLIP VLM Inference")
     print(f"  {MODEL_NAME}")
     print("=" * 60)
 
@@ -344,21 +364,12 @@ if __name__ == "__main__":
         print(f"  Run scripts/preprocess.py first.")
         sys.exit(1)
 
-    # Test on first 3 images to see variety
-    test_images = images[:3]
-
-    for test_image in test_images:
+    for test_image in images[:3]:
         print(f"\n  Image : {test_image.name}")
         print("-" * 50)
-
         result = infer_vlm_with_label(str(test_image))
-
         print(f"\n  Primary Disease : {result['disease_label']}")
         print(f"  Description     : {result['caption']}")
-        print(f"  Top Predictions :")
-        for disease, score in result["top_diseases"]:
-            bar = "█" * int(score * 40)
-            print(f"    {disease:<25} : {bar:<40} {score*100:.1f}%")
         print(f"  Response time   : {result['response_time']}s")
 
     print("\n" + "=" * 60)

@@ -1,7 +1,7 @@
 """
 tests/test_pipeline.py
 ======================
-Unit tests for PubMedCLIP + LLaMA pipeline.
+Unit tests for BiomedCLIP + LLaMA pipeline.
 
 Run directly with VS Code OR terminal:
     pytest tests/test_pipeline.py -v

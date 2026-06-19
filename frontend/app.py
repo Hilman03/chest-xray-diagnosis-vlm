@@ -5,7 +5,7 @@ Based on real PACS system standards:
 - Intelligent worklist with priority sorting
 - DICOM viewer with W/L controls
 - Side-by-side comparison
-- AI-assisted triage (PubMedCLIP)
+- AI-assisted triage (BiomedCLIP)
 - Structured report generation
 - PDF export
 - System stability monitoring
@@ -560,7 +560,7 @@ if st.session_state.page == "cover":
         <div class="lp-kicker">Chest Radiograph Analysis Workstation</div>
         <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
         <div class="lp-sub" style="margin-left:auto; margin-right:auto;">
-          A PACS-style workstation that pairs PubMedCLIP vision analysis
+          A PACS-style workstation that pairs BiomedCLIP vision analysis
           with Ollama report generation — upload, review, and export
           structured radiograph observations in one place.
         </div>
@@ -671,7 +671,7 @@ st.markdown(f"""
         <div style="width:1px; height:28px; background:#2e3442;"></div>
         <div style="font-family:'JetBrains Mono',monospace; font-size:11px;
                     color:#4a5368;">
-            PubMedCLIP · NIH ChestX-ray14
+            BiomedCLIP · NIH ChestX-ray14
         </div>
     </div>
     <div style="display:flex; align-items:center; gap:18px;">
@@ -1031,7 +1031,7 @@ if PAGE == "viewer":
                         <div style="font-family:'JetBrains Mono',monospace;
                                     font-size:10px; color:#5a6a7a; padding:4px 2px;">
                             Warm = stronger model attention. Explainability only
-                            (PubMedCLIP Grad-CAM), not a precise localization.
+                            (BiomedCLIP Grad-CAM), not a precise localization.
                         </div>
                         """, unsafe_allow_html=True)
                     else:
@@ -1132,7 +1132,7 @@ if PAGE == "viewer":
                 """, unsafe_allow_html=True)
                 if st.button("Run AI Analysis",
                              use_container_width=True, key="anb"):
-                    with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
+                    with cxr_spinner("Analyzing: BiomedCLIP → LLaMA report → Database…"):
                         rx = req(f"/analyze/{sid}",
                                  method="POST", t=180, no_cache=True)
                     if rx:
@@ -1174,7 +1174,7 @@ if PAGE == "viewer":
                                 unsafe_allow_html=True)
 
                 # Primary finding
-                section("AI Analysis — PubMedCLIP")
+                section("AI Analysis — BiomedCLIP")
                 dis_info = DISEASE_INFO.get(dis,"")
                 urg2, uc2 = URGENCY.get(dis,("ROUTINE","#6abe6a"))
 
@@ -1195,7 +1195,7 @@ if PAGE == "viewer":
                     </div>
                     <div style="font-family:'JetBrains Mono',monospace;
                                 font-size:11px; color:#3a6a3a;">
-                        PubMedCLIP · image-text matching
+                        BiomedCLIP · image-text matching
                     </div>
                     <div style="font-family:'Inter',sans-serif; font-size:12px;
                                 color:#5a8a5a; margin-top:6px; line-height:1.5;">
@@ -1205,7 +1205,7 @@ if PAGE == "viewer":
                 """, unsafe_allow_html=True)
 
                 # Confidence scores — rank 1 is the primary prediction, the
-                # rest are alternative possibilities (PubMedCLIP Top-3).
+                # rest are alternative possibilities (BiomedCLIP Top-3).
                 section("Confidence Scores — Top 3 Predictions")
                 for _rank, (d, s) in enumerate(rep.get("top_diseases",[])):
                     p    = int(s * 100)
@@ -1326,7 +1326,7 @@ if PAGE == "viewer":
                 with ac2:
                     if st.button("Analysis",
                                  use_container_width=True, key="reanalyze"):
-                        with cxr_spinner("Analyzing: PubMedCLIP → LLaMA report → Database…"):
+                        with cxr_spinner("Analyzing: BiomedCLIP → LLaMA report → Database…"):
                             rx = req(f"/analyze/{sid}",
                                      method="POST", t=180, no_cache=True)
                         if rx:
@@ -1419,7 +1419,7 @@ if PAGE == "upload":
                     uid = ru.json().get("image_id")
                     prog.progress(
                         min(base + 12, 99),
-                        text=f"[{idx+1}/{n}] PubMedCLIP Analysis → LLaMA Report → "
+                        text=f"[{idx+1}/{n}] BiomedCLIP Analysis → LLaMA Report → "
                              f"DB Storage — {up.name}"
                     )
                     ra = req(f"/analyze/{uid}", method="POST",
@@ -1586,6 +1586,45 @@ if PAGE == "history":
         </div>
         """, unsafe_allow_html=True)
     else:
+        # ── Detect duplicate x-rays (same person / same image) ────
+        # A study is flagged as a duplicate when another study shares
+        # either the same DICOM Patient ID (same person) or the same
+        # filename (same x-ray re-uploaded). Patient ID is the stronger
+        # signal; filename catches non-DICOM re-uploads.
+        from collections import Counter
+
+        def _pid(r):
+            pid = (r.get("patient_id") or "").strip()
+            # NIH DICOMs use "Unknown" when no PatientID tag exists — ignore those.
+            return "" if pid.lower() in ("", "unknown", "none") else pid.lower()
+
+        def _fname(r):
+            return (r.get("filename") or "").lower().strip()
+
+        _pid_counts   = Counter(_pid(r)   for r in rp3 if _pid(r))
+        _fname_counts = Counter(_fname(r) for r in rp3 if _fname(r))
+        dup_pids   = {p for p, c in _pid_counts.items()   if c > 1}
+        dup_fnames = {f for f, c in _fname_counts.items() if c > 1}
+
+        def _is_dup(r):
+            return _pid(r) in dup_pids or _fname(r) in dup_fnames
+
+        dup_count = sum(1 for r in rp3 if _is_dup(r))
+        dup_groups = len(dup_pids) + len(dup_fnames)
+
+        if dup_count:
+            st.markdown(f"""
+            <div style="background:#3a2326; border:1px solid #8a3b3b;
+                        border-radius:8px; padding:10px 14px; margin-bottom:12px;
+                        color:#e88; font-family:'Inter',sans-serif;
+                        font-size:13px; font-weight:500;">
+                ⚠ {dup_count} possible duplicate studies detected
+                ({len(dup_pids)} repeated patient ID{'s' if len(dup_pids) != 1 else ''},
+                {len(dup_fnames)} repeated filename{'s' if len(dup_fnames) != 1 else ''}).
+                Duplicates are highlighted in red below.
+            </div>
+            """, unsafe_allow_html=True)
+
         # Collect which studies are checked this run
         selected_ids = []
 
@@ -1602,14 +1641,30 @@ if PAGE == "history":
             dis4 = r.get("disease_label","—")
             urg4, uc4 = URGENCY.get(dis4,("ROUTINE","#6abe6a"))
 
+            is_dup = _is_dup(r)
+            dup_reason = ("same patient ID" if _pid(r) in dup_pids
+                          else "same filename") if is_dup else ""
+
             row_chk, row_exp = st.columns([1, 11])
             with row_chk:
                 if st.checkbox(" ", key=f"chk_{iid}",
                                label_visibility="collapsed"):
                     selected_ids.append(iid)
             with row_exp:
+                if is_dup:
+                    # Red banner above the duplicate study's expander.
+                    st.markdown(f"""
+                    <div style="background:#3a2326; border:1px solid #8a3b3b;
+                                border-radius:6px; padding:4px 10px;
+                                margin-bottom:-6px; color:#ff7a7a;
+                                font-family:'Inter',sans-serif; font-size:12px;
+                                font-weight:600;">
+                        🔴 DUPLICATE ({dup_reason}) · {r.get('filename','?')}
+                    </div>
+                    """, unsafe_allow_html=True)
+                dup_tag = "🔴 DUPLICATE  |  " if is_dup else ""
                 lbl = (
-                    f"{r.get('filename','?')}  |  "
+                    f"{dup_tag}{r.get('filename','?')}  |  "
                     f"{dis4}  |  {urg4}  |  "
                     f"{r.get('status','').upper()}"
                 )
@@ -1618,6 +1673,9 @@ if PAGE == "history":
                     with hc1:
                         sc2 = "#72c472" if r.get("status")=="analyzed" else "#d4aa50"
                         data_row("Study ID",   (iid or "")[:14]+"...")
+                        if _pid(r):
+                            data_row("Patient ID", r.get("patient_id",""),
+                                     color="#ff7a7a" if _pid(r) in dup_pids else "#dde1ea")
                         data_row("Status",     r.get("status","").upper(),
                                  color=sc2)
                         data_row("DICOM",      "Yes" if r.get("is_dicom") else "No")
@@ -1708,7 +1766,7 @@ if PAGE == "performance":
 
         # ── Stage averages ────────────────────────────────────
         s1, s2, s3 = st.columns(3)
-        s1.metric("Avg PubMedCLIP (VLM)", f"{_avg(vlms):.1f}s")
+        s1.metric("Avg BiomedCLIP (VLM)", f"{_avg(vlms):.1f}s")
         s2.metric("Avg LLaMA (LLM)",      f"{_avg(llms):.1f}s")
         s3.metric("Avg DB Storage",       f"{_avg(dbs):.2f}s")
 
@@ -1825,8 +1883,8 @@ if PAGE == "settings":
 
         for lbl, val, note in [
             ("Vision Language Model",
-             "PubMedCLIP",
-             "flaviagiammarino/pubmed-clip-vit-base-patch32"),
+             "BiomedCLIP",
+             "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"),
             ("Report Generator",
              "Qwen2.5-1.5B (in-process)",
              "Prompt-engineered, disease-aware structured report"),

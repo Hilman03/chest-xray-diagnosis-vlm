@@ -8,7 +8,7 @@ directly in this Python process and is loaded ONCE as a singleton, so there is
 nothing to install or keep alive separately and nothing that can crash with a
 500 / OOM the way an external vision server does on a small GPU.
 
-The model receives the PubMedCLIP findings (disease + confidence scores) and
+The model receives the BiomedCLIP findings (disease + confidence scores) and
 writes a structured observational report. The prompt is constrained so the
 report stays grounded and on-topic — no invented findings.
 
@@ -57,7 +57,7 @@ _tokenizer = None
 SYSTEM_MSG = (
     "You are a board-certified radiologist drafting a factual chest X-ray "
     "observation report from an AI image-analysis result. You did NOT see the "
-    "image yourself — your ONLY source is the PubMedCLIP findings below. "
+    "image yourself — your ONLY source is the BiomedCLIP findings below. "
     "Ground every statement in those findings and calibrate your wording to "
     "their confidence: high confidence reads as a clear finding, moderate as "
     "'suggested'/'possible', low as 'cannot be excluded'. "
@@ -156,7 +156,7 @@ def _build_prompt(caption: str, disease_label: str,
     primary_info = _disease_info(disease_label) or "the predicted condition"
 
     return (
-        f"PubMedCLIP image analysis findings (with clinical background):\n"
+        f"BiomedCLIP image analysis findings (with clinical background):\n"
         f"{findings_str}\n"
         f"Primary finding: {disease_label} ({_top_score(top_diseases)})\n"
         f"Reference description: \"{caption}\"\n\n"
@@ -333,7 +333,7 @@ def refine_llm(caption: str, disease_label: str,
                top_diseases: list = None,
                image_path: str = None) -> dict:
     """
-    Generate a structured observational report from the PubMedCLIP findings
+    Generate a structured observational report from the BiomedCLIP findings
     using the in-process transformers LLM.
 
     `image_path` is accepted for backward compatibility with the pipeline but

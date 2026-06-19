@@ -1,7 +1,7 @@
 """
 tests/test_pipeline_run.py
 ==========================
-Run PubMedCLIP pipeline on 10 sample images.
+Run BiomedCLIP pipeline on 10 sample images.
 Output : tests/sample_outputs.json
 """
 
@@ -23,7 +23,7 @@ TARGET_TIME = 15.0
 
 def run_sample_test():
     print("=" * 60)
-    print("  10 Image Sample Test — PubMedCLIP + LLaMA")
+    print("  10 Image Sample Test — BiomedCLIP + LLaMA")
     print("=" * 60)
 
     all_images = sorted(IMAGES_DIR.glob("*.png"))
@@ -86,8 +86,8 @@ def run_sample_test():
 
     summary = {
         "test_date"          : datetime.now().isoformat(),
-        "approach"           : "PubMedCLIP + LLaMA",
-        "model"              : "flaviagiammarino/pubmed-clip-vit-base-patch32",
+        "approach"           : "BiomedCLIP + LLaMA",
+        "model"              : "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224",
         "total_images_tested": len(samples),
         "success_count"      : success_count,
         "error_count"        : error_count,

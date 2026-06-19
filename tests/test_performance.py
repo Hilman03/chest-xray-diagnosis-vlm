@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 import pytest
 
 # Acceptable response time thresholds (seconds)
-VLM_MAX_TIME   = 60.0    # PubMedCLIP on CPU
+VLM_MAX_TIME   = 60.0    # BiomedCLIP on CPU
 LLM_MAX_TIME   = 120.0   # TinyLlama on CPU
 TOTAL_MAX_TIME = 180.0   # Full pipeline on CPU (generous for cold start)
 TOTAL_GPU_TIME = 30.0    # Full pipeline on CUDA
@@ -74,7 +74,7 @@ class TestResponseTime:
         assert result["response_time"] > 0
 
     def test_vlm_inference_within_limit(self, sample_image_path):
-        """PubMedCLIP inference must complete within VLM_MAX_TIME."""
+        """BiomedCLIP inference must complete within VLM_MAX_TIME."""
         from models.vlm_inference import infer_vlm_with_label
         t0     = time.time()
         result = infer_vlm_with_label(sample_image_path)
@@ -128,7 +128,7 @@ class TestResponseTime:
 class TestOutputConsistency:
     def test_vlm_same_image_same_label(self, sample_image_path):
         """
-        PubMedCLIP is deterministic (no sampling) — the same image
+        BiomedCLIP is deterministic (no sampling) — the same image
         must produce the same primary disease label every time.
         """
         from models.vlm_inference import infer_vlm_with_label
