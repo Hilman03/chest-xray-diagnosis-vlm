@@ -72,9 +72,11 @@ def run_pipeline(image_path: str) -> dict:
         # A failed VLM returns success=False with an "Unknown" label — treat
         # it as an error instead of generating a bogus report downstream.
         if not vlm_result.get("success", False):
+            reason = vlm_result.get("error", "").strip()
             raise RuntimeError(
-                "BiomedCLIP inference failed — model unavailable or "
-                "prediction error. Check that the model loaded correctly."
+                "BiomedCLIP inference failed — "
+                + (reason or "model unavailable or prediction error. "
+                   "Check that the model loaded correctly.")
             )
 
         result["vlm_caption"]   = vlm_result["caption"]

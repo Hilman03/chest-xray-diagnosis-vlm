@@ -502,7 +502,7 @@ async def analyze_image(image_id: str):
 
     Pipeline:
         1. BiomedCLIP (VLM) — predicts disease from image
-        2. Ollama LLM — generates structured observational report
+        2. Qwen2.5-1.5B-Instruct (LLM) — generates structured observational report
            (prompt-engineered, grounded in the BiomedCLIP findings)
         3. Stores result in MongoDB Atlas
 
@@ -962,7 +962,7 @@ async def system_status():
         "total_reports"   : len(list_records()),
         "models_loaded"   : {
             "vlm" : "BiomedCLIP (microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224)",
-            "llm" : "Ollama vision (llama3.2-vision)",
+            "llm" : "Qwen2.5-1.5B-Instruct (Qwen/Qwen2.5-1.5B-Instruct)",
         },
         "inference_only"  : True,
         "training"        : False,
@@ -1092,14 +1092,14 @@ async def run_system_tests():
                 vlm_result["top_diseases"],
             )
             elapsed = round(time.time() - t0, 3)
-            _r("LLM Report Generation (TinyLlama)", "PASS",
+            _r("LLM Report Generation (Qwen2.5-1.5B-Instruct)", "PASS",
                llm_result["report"],
                backend=llm_result["backend"],
                response_time=elapsed)
         except Exception as e:
-            _r("LLM Report Generation (TinyLlama)", "FAIL", str(e))
+            _r("LLM Report Generation (Qwen2.5-1.5B-Instruct)", "FAIL", str(e))
     else:
-        _r("LLM Report Generation (TinyLlama)", "SKIP", "VLM did not produce output")
+        _r("LLM Report Generation (Qwen2.5-1.5B-Instruct)", "SKIP", "VLM did not produce output")
 
     # ── Test 6: full pipeline end-to-end ─────────────────────
     if image_path:

@@ -51,3 +51,10 @@ env/
 *.xlsx
 tests/test_report.json
 tests/test_report.txt
+
+# Report documents (not code)
+*.docx
+*.pdf
+*.pptx
+*.bib
+~$*

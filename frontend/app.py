@@ -477,6 +477,22 @@ def section(label):
     </div>
     """, unsafe_allow_html=True)
 
+def _style_chart(chart, axis_color="#6a7385", grid_color="#2e3442"):
+    """Apply the dark-UI theme to an Altair chart (transparent surface,
+    recessive grid/axes, readable ink)."""
+    return (
+        chart
+        .configure_view(strokeWidth=0, fill=None)
+        .configure_axis(
+            labelColor=axis_color, titleColor=axis_color,
+            labelFontSize=11, titleFontSize=12,
+            gridColor=grid_color, domainColor=grid_color,
+            tickColor=grid_color,
+            labelFont="Inter", titleFont="Inter",
+        )
+        .configure_legend(labelFont="Inter", titleFont="Inter")
+    )
+
 def data_row(label, value, color="#dde1ea", border=True):
     bdr = "border-bottom:1px solid #262c38;" if border else ""
     st.markdown(f"""
@@ -709,10 +725,12 @@ if not ok:
     )
 
 # ── Page registry ─────────────────────────────────────────────
-PAGES = ["worklist", "viewer", "upload", "history", "performance", "settings"]
+PAGES = ["worklist", "viewer", "upload", "history", "performance",
+         "system_test", "settings"]
 PAGE_LABELS = {
     "worklist": "Worklist", "viewer": "Viewer", "upload": "Upload",
-    "history": "History", "performance": "Performance", "settings": "Settings",
+    "history": "History", "performance": "Performance",
+    "system_test": "System Test", "settings": "Settings",
 }
 
 # ── Page navigation bar ───────────────────────────────────────
@@ -1767,16 +1785,105 @@ if PAGE == "performance":
         # ── Stage averages ────────────────────────────────────
         s1, s2, s3 = st.columns(3)
         s1.metric("Avg BiomedCLIP (VLM)", f"{_avg(vlms):.1f}s")
-        s2.metric("Avg LLaMA (LLM)",      f"{_avg(llms):.1f}s")
+        s2.metric("Avg Qwen (LLM)",       f"{_avg(llms):.1f}s")
         s3.metric("Avg DB Storage",       f"{_avg(dbs):.2f}s")
 
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-        # ── Trend chart ───────────────────────────────────────
-        section("Processing-Time Trend (per study, chronological)")
-        st.line_chart(
-            {"Total (s)": totals, "VLM (s)": vlms, "LLM (s)": llms},
-            height=260,
+        # ── Charts (Altair for annotations examiners can read) ─
+        import altair as alt
+        import pandas as pd
+
+        AX  = "#6a7385"    # muted axis ink
+        GRID = "#2e3442"   # hairline grid
+        C_VLM, C_LLM, C_DB = "#3987e5", "#199e70", "#c98500"
+        C_TOTAL = "#74aaff"
+
+        idx    = list(range(1, n + 1))
+        fnames = [ (r.get("filename", "") or "")[:28] for r in studies ]
+        avg_total = _avg(totals)
+
+        base_df = pd.DataFrame({
+            "Study": idx, "File": fnames,
+            "Total": totals, "VLM": vlms, "LLM": llms, "DB": dbs,
+        })
+
+        # ── Chart 1: Total-time trend + average reference line ─
+        section("Processing-Time Trend — is it consistently fast?")
+
+        area = alt.Chart(base_df).mark_area(
+            color=C_TOTAL, opacity=0.10,
+        ).encode(
+            x=alt.X("Study:O", title="Study (chronological →)"),
+            y=alt.Y("Total:Q", title="Total time (seconds)"),
+        )
+        line = alt.Chart(base_df).mark_line(
+            color=C_TOTAL, strokeWidth=2.5,
+        ).encode(x="Study:O", y="Total:Q")
+        pts = alt.Chart(base_df).mark_point(
+            color=C_TOTAL, size=70, filled=True,
+        ).encode(
+            x="Study:O", y="Total:Q",
+            tooltip=[alt.Tooltip("File:N", title="File"),
+                     alt.Tooltip("Total:Q", title="Total (s)", format=".1f"),
+                     alt.Tooltip("VLM:Q", format=".1f"),
+                     alt.Tooltip("LLM:Q", format=".1f"),
+                     alt.Tooltip("DB:Q", format=".2f")],
+        )
+        avg_df = pd.DataFrame({"y": [avg_total]})
+        avg_rule = alt.Chart(avg_df).mark_rule(
+            color="#e0863a", strokeDash=[6, 4], strokeWidth=1.5,
+        ).encode(y="y:Q")
+        avg_txt = alt.Chart(avg_df).mark_text(
+            align="left", dx=6, dy=-8, color="#e0863a",
+            fontSize=12, fontWeight="bold",
+        ).encode(y="y:Q", text=alt.value(f"Average  {avg_total:.1f}s"))
+
+        trend = (area + line + pts + avg_rule + avg_txt).properties(height=280)
+        st.altair_chart(_style_chart(trend, AX, GRID), use_container_width=True)
+
+        st.caption(
+            f"Each point is one study, oldest → newest. The dashed line marks the "
+            f"average total time ({avg_total:.1f}s); points hugging that line show "
+            f"the pipeline stays consistent regardless of case."
+        )
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+        # ── Chart 2: stacked stage breakdown (where time goes) ─
+        section("Where the Time Goes — stage breakdown per study")
+
+        long_df = base_df.melt(
+            id_vars=["Study", "File"],
+            value_vars=["VLM", "LLM", "DB"],
+            var_name="Stage", value_name="Seconds",
+        )
+        stage_order = ["VLM", "LLM", "DB"]
+        stacked = alt.Chart(long_df).mark_bar(
+            stroke="#1a2030", strokeWidth=2, cornerRadiusTopLeft=3,
+            cornerRadiusTopRight=3,
+        ).encode(
+            x=alt.X("Study:O", title="Study (chronological →)"),
+            y=alt.Y("Seconds:Q", title="Time (seconds)", stack=True),
+            color=alt.Color(
+                "Stage:N",
+                scale=alt.Scale(domain=stage_order,
+                                range=[C_VLM, C_LLM, C_DB]),
+                legend=alt.Legend(title="Pipeline stage", orient="top",
+                                  labelColor=AX, titleColor=AX),
+                sort=stage_order,
+            ),
+            order=alt.Order("Stage:N", sort="ascending"),
+            tooltip=[alt.Tooltip("File:N", title="File"),
+                     alt.Tooltip("Stage:N"),
+                     alt.Tooltip("Seconds:Q", format=".2f")],
+        ).properties(height=280)
+        st.altair_chart(_style_chart(stacked, AX, GRID), use_container_width=True)
+
+        st.caption(
+            "Each bar is one study split into its stages: "
+            "BiomedCLIP (VLM), the report LLM, and DB storage. The LLM segment "
+            "dominates total time, while DB storage is negligible."
         )
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -1818,6 +1925,61 @@ if PAGE == "performance":
                 <div style="color:{exp_col};">{exp_txt}</div>
             </div>
             """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════
+# SYSTEM TEST  — report-ready functional / stability / error tables
+# ══════════════════════════════════════════════════════════
+if PAGE == "system_test":
+    st.markdown("""
+    <div style="font-family:'Inter',sans-serif; font-size:13px;
+                font-weight:500; color:#6a7385; margin-bottom:16px;">
+        Runs the live functional, stability and error-handling tests against the
+        connected backend and produces the report tables (4.4 &amp; 4.5).
+    </div>
+    """, unsafe_allow_html=True)
+
+    stc1, stc2 = st.columns([1, 3])
+    with stc1:
+        stab_n = st.number_input("Stability images", min_value=1, max_value=10,
+                                 value=10, key="systest_n")
+    run_test = st.button("Run System Test", type="primary", key="run_systest")
+
+    if run_test:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _root = str(_Path(__file__).resolve().parent.parent)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        try:
+            from tests import report_test as _rt
+        except Exception as e:
+            st.error(f"Could not load test module: {e}")
+            _rt = None
+
+        if _rt is not None:
+            api = st.session_state.api.rstrip("/")
+            try:
+                with cxr_spinner("Running system tests… this analyses several "
+                                 "studies and may take a minute"):
+                    func_rows = _rt.functional_tests(api)
+                    stab      = _rt.stability_test(api, int(stab_n))
+                    err_rows  = _rt.error_handling_tests(api)
+                    md        = _rt.build_markdown(func_rows, stab, err_rows)
+                st.session_state.systest_md = md
+            except Exception as e:
+                st.error(f"System test failed to run: {e}")
+
+    if st.session_state.get("systest_md"):
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown(st.session_state.systest_md)
+        st.download_button(
+            "Download report tables (Markdown)",
+            data=st.session_state.systest_md,
+            file_name="report_test_results.md",
+            mime="text/markdown",
+            key="dl_systest",
+        )
 
 
 # ══════════════════════════════════════════════════════════

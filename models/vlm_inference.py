@@ -162,6 +162,7 @@ def predict_diseases(image_path: str) -> dict:
             "all_scores"   : {},
             "primary_label": "Unknown",
             "description"  : "Model unavailable",
+            "error"        : "Model failed to load (see backend logs)",
             "success"      : False,
         }
 
@@ -195,12 +196,16 @@ def predict_diseases(image_path: str) -> dict:
         }
 
     except Exception as e:
-        print(f"  [BiomedCLIP] Prediction error: {e}")
+        import traceback
+        traceback.print_exc()
+        detail = f"{type(e).__name__}: {e}".strip().rstrip(":").strip()
+        print(f"  [BiomedCLIP] Prediction error: {detail}")
         return {
             "top_diseases" : [("Unknown", 0.0)],
             "all_scores"   : {},
             "primary_label": "Unknown",
             "description"  : "Prediction failed",
+            "error"        : detail or "Prediction failed",
             "success"      : False,
         }
 
@@ -249,6 +254,7 @@ def infer_vlm_with_label(image_path: str) -> dict:
         "image_name"    : image_name,
         "response_time" : elapsed,
         "success"       : result["success"],
+        "error"         : result.get("error", ""),
     }
 
 
