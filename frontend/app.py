@@ -577,7 +577,7 @@ if st.session_state.page == "cover":
         <div class="lp-h1">Read chest X-rays<br>with <span class="accent">AI assistance.</span></div>
         <div class="lp-sub" style="margin-left:auto; margin-right:auto;">
           A PACS-style workstation that pairs BiomedCLIP vision analysis
-          with Ollama report generation — upload, review, and export
+          with an in-process Qwen2.5 LLM for report generation — upload, review, and export
           structured radiograph observations in one place.
         </div>
         <div style="display:inline-flex; align-items:center; gap:8px;
@@ -1150,7 +1150,7 @@ if PAGE == "viewer":
                 """, unsafe_allow_html=True)
                 if st.button("Run AI Analysis",
                              use_container_width=True, key="anb"):
-                    with cxr_spinner("Analyzing: BiomedCLIP → LLaMA report → Database…"):
+                    with cxr_spinner("Analyzing: BiomedCLIP → Qwen2.5 report → Database…"):
                         rx = req(f"/analyze/{sid}",
                                  method="POST", t=180, no_cache=True)
                     if rx:
@@ -1344,7 +1344,7 @@ if PAGE == "viewer":
                 with ac2:
                     if st.button("Analysis",
                                  use_container_width=True, key="reanalyze"):
-                        with cxr_spinner("Analyzing: BiomedCLIP → LLaMA report → Database…"):
+                        with cxr_spinner("Analyzing: BiomedCLIP → Qwen2.5 report → Database…"):
                             rx = req(f"/analyze/{sid}",
                                      method="POST", t=180, no_cache=True)
                         if rx:
@@ -1437,7 +1437,7 @@ if PAGE == "upload":
                     uid = ru.json().get("image_id")
                     prog.progress(
                         min(base + 12, 99),
-                        text=f"[{idx+1}/{n}] BiomedCLIP Analysis → LLaMA Report → "
+                        text=f"[{idx+1}/{n}] BiomedCLIP Analysis → Qwen2.5 Report → "
                              f"DB Storage — {up.name}"
                     )
                     ra = req(f"/analyze/{uid}", method="POST",

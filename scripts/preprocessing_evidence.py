@@ -232,7 +232,7 @@ def main():
         f"Source: {src.name}   |   {TARGET_SIZE[0]}x{TARGET_SIZE[1]} px, RGB\n"
         "Resized & normalized — anatomical structures preserved,\n"
         "consistent dimensions and standardized pixel distribution.\n"
-        "Ready for BiomedCLIP prediction and LLaMA report generation."
+        "Ready for BiomedCLIP prediction and Qwen2.5 report generation."
     )
     f.text(0.5, 0.10, caption, ha="center", va="center", fontsize=8.6,
            color="#39434f")

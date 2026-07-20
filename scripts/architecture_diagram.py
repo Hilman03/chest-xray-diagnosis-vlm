@@ -5,7 +5,7 @@ Generates Figure 4.2 — Proposed system architecture.
 
 A clean block-and-arrow diagram (matplotlib) of the five-component modular
 system: PACS frontend workstation, preprocessing module, BiomedCLIP VLM,
-LLaMA report generator, and MongoDB database — showing the end-to-end flow.
+Qwen2.5-1.5B-Instruct report generator, and MongoDB database — showing the end-to-end flow.
 
 Run from project root:
     python scripts/architecture_diagram.py
@@ -78,7 +78,7 @@ def main():
     box(ax, 3.7,  y, BW, BH, "BiomedCLIP (VLM)",
         ["Image-text matching vs.", "thoracic disease descriptions",
          "-> disease + confidence"], C_VLM, E_VLM)
-    box(ax, 7.0,  y, BW, BH, "LLaMA Report Generator",
+    box(ax, 7.0,  y, BW, BH, "Qwen2.5 Report Generator",
         ["Structured prompt template", "-> radiology-style", "observational report"], C_LLM, E_LLM)
     box(ax, 10.3, y, BW, BH, "MongoDB Database",
         ["Stores report, predictions,", "metrics & metadata", "for retrieval/analysis"], C_DB, E_DB)

@@ -23,7 +23,7 @@ TARGET_TIME = 15.0
 
 def run_sample_test():
     print("=" * 60)
-    print("  10 Image Sample Test — BiomedCLIP + LLaMA")
+    print("  10 Image Sample Test — BiomedCLIP + Qwen2.5")
     print("=" * 60)
 
     all_images = sorted(IMAGES_DIR.glob("*.png"))
@@ -86,7 +86,7 @@ def run_sample_test():
 
     summary = {
         "test_date"          : datetime.now().isoformat(),
-        "approach"           : "BiomedCLIP + LLaMA",
+        "approach"           : "BiomedCLIP + Qwen2.5",
         "model"              : "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224",
         "total_images_tested": len(samples),
         "success_count"      : success_count,

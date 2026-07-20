@@ -15,7 +15,7 @@ Flow:
     CXR Image + Disease text descriptions (prompt-ensembled)
         -> BiomedCLIP scores similarity for each disease
         -> Returns ranked diseases with confidence scores
-        -> Passed to LLaMA for structured report
+        -> Passed to Qwen2.5-1.5B-Instruct for structured report
 
 Loaded via open_clip (not HuggingFace CLIPModel):
     pip install open_clip_torch

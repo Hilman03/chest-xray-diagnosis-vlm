@@ -25,7 +25,7 @@ import pytest
 
 # Acceptable response time thresholds (seconds)
 VLM_MAX_TIME   = 60.0    # BiomedCLIP on CPU
-LLM_MAX_TIME   = 120.0   # TinyLlama on CPU
+LLM_MAX_TIME   = 120.0   # Qwen2.5-1.5B-Instruct on CPU
 TOTAL_MAX_TIME = 180.0   # Full pipeline on CPU (generous for cold start)
 TOTAL_GPU_TIME = 30.0    # Full pipeline on CUDA
 
@@ -58,7 +58,7 @@ def mock_vlm_result():
 def mock_llm_result():
     return {
         "report"        : "The chest radiograph demonstrates adequate exposure. Increased opacity in the left lower lobe is noted. No additional significant abnormalities are identified.",
-        "backend"       : "tinyllama",
+        "backend"       : "transformers:Qwen2.5-1.5B-Instruct",
         "response_time" : 2.0,
     }
 

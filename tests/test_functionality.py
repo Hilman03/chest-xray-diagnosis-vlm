@@ -63,7 +63,7 @@ def mock_vlm_result():
 def mock_llm_result():
     return {
         "report"        : "The chest radiograph demonstrates adequate exposure. Increased opacity in the left lower lobe consistent with pneumonia. No additional significant abnormalities identified.",
-        "backend"       : "tinyllama",
+        "backend"       : "transformers:Qwen2.5-1.5B-Instruct",
         "response_time" : 2.0,
     }
 
@@ -143,7 +143,7 @@ class TestVLMFunctionality:
 class TestLLMFunctionality:
     def test_report_is_string(self, mock_vlm_result, mock_llm_result):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+        with patch("models.llm_refine.load_llm", return_value=True), \
              patch("models.llm_refine._generate", return_value=mock_llm_result["report"]):
             result = refine_llm(
                 mock_vlm_result["caption"],
@@ -154,7 +154,7 @@ class TestLLMFunctionality:
 
     def test_report_minimum_length(self, mock_vlm_result, mock_llm_result):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+        with patch("models.llm_refine.load_llm", return_value=True), \
              patch("models.llm_refine._generate", return_value=mock_llm_result["report"]):
             result = refine_llm(
                 mock_vlm_result["caption"],
@@ -164,12 +164,12 @@ class TestLLMFunctionality:
 
     def test_report_does_not_contain_ai_mention(self, mock_vlm_result):
         report = "The chest radiograph demonstrates adequate exposure. Increased opacity noted. No additional significant findings."
-        with patch("models.llm_refine.load_tinyllama", return_value=True), \
+        with patch("models.llm_refine.load_llm", return_value=True), \
              patch("models.llm_refine._generate", return_value=report):
             from models.llm_refine import refine_llm
             result = refine_llm(mock_vlm_result["caption"], mock_vlm_result["disease_label"])
         lowered = result["report"].lower()
-        for forbidden in ["ai system", "software", "model generated", "tinyllama"]:
+        for forbidden in ["ai system", "software", "model generated", "qwen2.5-1.5b-instruct"]:
             assert forbidden not in lowered, f"Report mentions '{forbidden}'"
 
 

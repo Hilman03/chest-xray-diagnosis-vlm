@@ -54,7 +54,7 @@ def client():
     }
     mock_llm = {
         "report"        : "The chest radiograph demonstrates adequate exposure. Increased opacity in the left lower lobe is noted. No additional significant abnormalities are identified.",
-        "backend"       : "tinyllama",
+        "backend"       : "transformers:Qwen2.5-1.5B-Instruct",
         "response_time" : 2.0,
     }
 
@@ -164,7 +164,7 @@ class TestAnalyzeEndpoint:
         }
         mock_llm = {
             "report": "Normal findings. Adequate exposure. No abnormalities.",
-            "backend": "tinyllama",
+            "backend": "transformers:Qwen2.5-1.5B-Instruct",
             "response_time": 2.0,
         }
         with patch("backend.main.infer_vlm_with_label", return_value=mock_vlm), \
@@ -184,7 +184,7 @@ class TestAnalyzeEndpoint:
         }
         mock_llm = {
             "report": "Adequate exposure. Findings noted. No additional abnormalities.",
-            "backend": "tinyllama",
+            "backend": "transformers:Qwen2.5-1.5B-Instruct",
             "response_time": 2.0,
         }
         with patch("backend.main.infer_vlm_with_label", return_value=mock_vlm), \
@@ -220,7 +220,7 @@ class TestReportEndpoint:
         }
         mock_llm = {
             "report": "Adequate exposure. Findings present. No other abnormalities.",
-            "backend": "tinyllama",
+            "backend": "transformers:Qwen2.5-1.5B-Instruct",
             "response_time": 2.0,
         }
         with patch("backend.main.infer_vlm_with_label", return_value=mock_vlm), \
@@ -282,7 +282,7 @@ class TestEndToEndWorkflow:
         }
         mock_llm = {
             "report": "The radiograph is of adequate diagnostic quality. Dense consolidation is visible in the lower lobe. No additional significant abnormalities are noted.",
-            "backend": "tinyllama",
+            "backend": "transformers:Qwen2.5-1.5B-Instruct",
             "response_time": 3.5,
         }
 
@@ -335,7 +335,7 @@ class TestEndToEndWorkflow:
         }
         mock_llm = {
             "report": "Normal study. Clear lung fields. No abnormalities noted.",
-            "backend": "tinyllama",
+            "backend": "transformers:Qwen2.5-1.5B-Instruct",
             "response_time": 3.0,
         }
         upload_resp = client.post(

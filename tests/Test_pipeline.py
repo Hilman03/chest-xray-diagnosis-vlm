@@ -1,7 +1,7 @@
 """
 tests/test_pipeline.py
 ======================
-Unit tests for BiomedCLIP + LLaMA pipeline.
+Unit tests for BiomedCLIP + Qwen2.5 pipeline.
 
 Run directly with VS Code OR terminal:
     pytest tests/test_pipeline.py -v
@@ -58,11 +58,6 @@ class TestPrompts:
         prompt = get_report_prompt(sample_caption, sample_label, sample_top_diseases)
         assert "72.0%" in prompt or "72%" in prompt
 
-    def test_ollama_has_inst_tags(self, sample_caption, sample_label):
-        from models.prompts import get_ollama_prompt
-        prompt = get_ollama_prompt(sample_caption, sample_label)
-        assert "[INST]" in prompt and "[/INST]" in prompt
-
     def test_system_prompt_not_empty(self):
         from models.prompts import SYSTEM_PROMPT
         assert len(SYSTEM_PROMPT) > 20
@@ -109,50 +104,38 @@ class TestVLMInference:
 
 
 # ─────────────────────────────────────────────────────────────
-# LLM (mocked)
+# LLM (mocked — in-process transformers backend, no external server)
 # ─────────────────────────────────────────────────────────────
 class TestLLMRefine:
-    def _mock_generate(self, caption, label, top=None):
-        return "Good image. Pneumonia findings visible. No other significant abnormalities."
+    def _mock_generate(self, *args, **kwargs):
+        return "Findings: Pneumonia findings visible. Impression: no other significant abnormalities."
 
     def test_returns_dict(self, sample_caption, sample_label, sample_top_diseases):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine._ollama_available", return_value=True), \
-             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
-                 sample_caption, sample_label, sample_top_diseases)):
+        with patch("models.llm_refine.load_llm", return_value=True), \
+             patch("models.llm_refine._generate", side_effect=self._mock_generate):
             result = refine_llm(sample_caption, sample_label, sample_top_diseases)
         assert "report" in result
         assert "backend" in result
         assert "response_time" in result
 
-    def test_backend_is_ollama_when_available(self, sample_caption, sample_label):
-        from models.llm_refine import refine_llm
-        with patch("models.llm_refine._ollama_available", return_value=True), \
-             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
-                 sample_caption, sample_label)):
+    def test_backend_is_transformers(self, sample_caption, sample_label):
+        from models.llm_refine import refine_llm, LLM_MODEL
+        with patch("models.llm_refine.load_llm", return_value=True), \
+             patch("models.llm_refine._generate", side_effect=self._mock_generate):
             result = refine_llm(sample_caption, sample_label)
-        assert result["backend"] == "ollama"
-
-    def test_backend_is_ollama_vision_with_image(self, sample_caption, sample_label):
-        from models.llm_refine import refine_llm
-        with patch("models.llm_refine._ollama_available", return_value=True), \
-             patch("models.llm_refine.ENABLE_VISION", True), \
-             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
-                 sample_caption, sample_label)):
-            result = refine_llm(sample_caption, sample_label, image_path="x.png")
-        assert result["backend"] == "ollama-vision"
+        assert result["backend"] == f"transformers:{LLM_MODEL.split('/')[-1]}"
 
     def test_report_not_empty(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine._ollama_available", return_value=True), \
-             patch("models.llm_refine._generate_ollama", return_value=self._mock_generate(
-                 sample_caption, sample_label)):
+        with patch("models.llm_refine.load_llm", return_value=True), \
+             patch("models.llm_refine._generate", side_effect=self._mock_generate):
             result = refine_llm(sample_caption, sample_label)
         assert len(result["report"]) > 20
 
-    def test_ollama_down_raises(self, sample_caption, sample_label):
+    def test_load_failure_raises(self, sample_caption, sample_label):
         from models.llm_refine import refine_llm
-        with patch("models.llm_refine._ollama_available", return_value=False):
+        with patch("models.llm_refine.load_llm", return_value=False):
             with pytest.raises(RuntimeError):
                 refine_llm(sample_caption, sample_label)
 
@@ -174,8 +157,8 @@ class TestPipeline:
 
     def _mock_llm(self):
         return {
-            "report"        : "Good image. Pneumonia findings visible. High confidence.",
-            "backend"       : "ollama",
+            "report"        : "Findings: Pneumonia visible. Impression: high confidence.",
+            "backend"       : "transformers:Qwen2.5-1.5B-Instruct",
             "response_time" : 1.0,
         }
 

@@ -1,14 +1,14 @@
 """
 pipeline.py
 ===========
-Full Inference Pipeline — BiomedCLIP + LLaMA
+Full Inference Pipeline — BiomedCLIP + Qwen2.5
 
 Flow:
     CXR Image
         |
         ├─> BiomedCLIP  → disease predictions (image-text matching)
         |
-        └─> LLaMA       → structured observational report
+        └─> Qwen2.5     → structured observational report
 
 Can be run directly with VS Code Run button OR terminal.
 """
@@ -26,7 +26,7 @@ from models.llm_refine import refine_llm
 
 def run_pipeline(image_path: str) -> dict:
     """
-    Full pipeline: CXR image -> BiomedCLIP -> LLaMA report
+    Full pipeline: CXR image -> BiomedCLIP -> Qwen2.5 report
 
     Returns:
         {
@@ -120,7 +120,7 @@ def run_pipeline(image_path: str) -> dict:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Full Pipeline — BiomedCLIP + LLaMA")
+    print("  Full Pipeline — BiomedCLIP + Qwen2.5")
     print("=" * 60)
 
     images_dir = ROOT / "data" / "processed" / "images"
